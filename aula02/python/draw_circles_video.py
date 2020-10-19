@@ -9,9 +9,13 @@ import numpy as np
 from matplotlib import pyplot as plt
 import time
 import sys
+import auxiliar as aux
+import math
+#import imutils
+#from imutils import paths
 
 # If you want to open a video, just change v2.VideoCapture(0) from 0 to the filename, just like below
-#cap = cv2.VideoCapture('hall_box_battery.mp4')
+
 
 if len(sys.argv) > 1:
     arg = sys.argv[1]
@@ -50,55 +54,112 @@ def auto_canny(image, sigma=0.33):
     # return the edged image
     return edged
 
+D = 40
+H = float(input("Digite a distância real entre os centros dos círculos em cm: "))
+h = 560 
+f = (h*D)/H
+
 
 
 while(True):
     # Capture frame-by-frame
     ret, frame = cap.read()
 
-    # Convert the frame to grayscale
+    # Convert the frame to grayscale and hsv
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    # A gaussian blur to get rid of the noise in the image
-    blur = cv2.GaussianBlur(gray,(5,5),0)
-    #blur = gray
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    
+
+    magenta='#FF00FE'
+    hsv1_m, hsv2_m = aux.ranges(magenta)
+    mask_m = cv2.inRange(hsv, hsv1_m, hsv2_m)
+
+    ciano='#00FFFF'
+    hsv1_c, hsv2_c = aux.ranges(ciano)
+    mask_c = cv2.inRange(hsv, hsv1_c, hsv2_c)
+
+    
+    blur_mag = cv2.GaussianBlur(mask_m,(5,5),0)
+    blur_cya = cv2.GaussianBlur(mask_c,(5,5),0)
+    blur = cv2.add(blur_cya, blur_mag) 
+
     # Detect the edges present in the image
-    bordas = auto_canny(blur)
+    bordas_m = auto_canny(blur_mag)
+    bordas_c = auto_canny(blur_cya)
 
-
-    circles = []
-
-
+    bordas = cv2.add(bordas_c, bordas_m)
+    
+    
     # Obtains a version of the edges image where we can draw in color
-    bordas_color = cv2.cvtColor(bordas, cv2.COLOR_GRAY2BGR)
+    bordas_color = cv2.cvtColor(bordas, cv2.COLOR_GRAY2BGR)   
 
-    # HoughCircles - detects circles using the Hough Method. For an explanation of
-    # param1 and param2 please see an explanation here http://www.pyimagesearch.com/2014/07/21/detecting-circles-images-using-opencv-hough-circles/
-    circles = None
-    circles=cv2.HoughCircles(bordas,cv2.HOUGH_GRADIENT,2,40,param1=50,param2=100,minRadius=5,maxRadius=60)
+    circles_mag = []
+    circles_cya = []
+    
+    circles_mag = None
+    xm = None
+    ym = None
+    circles_m = cv2.HoughCircles(bordas_m,cv2.HOUGH_GRADIENT,2,40,param1=50,param2=100,minRadius=5,maxRadius=60)
 
-    if circles is not None:        
-        circles = np.uint16(np.around(circles))
-        for i in circles[0,:]:
-            print(i)
+    if circles_m is not None:        
+        circles_m = np.uint16(np.around(circles_m))
+        for i in circles_m[0,:]:
+            xm = i[0]
+            ym = i[1]
+
             # draw the outer circle
-            # cv2.circle(img, center, radius, color[, thickness[, lineType[, shift]]])
-            cv2.circle(bordas_color,(i[0],i[1]),i[2],(0,255,0),2)
+            cv2.circle(bordas_color,(i[0],i[1]),i[2],(255,0,255),2)
+            # draw the center of the circle
+            cv2.circle(bordas_color,(i[0],i[1]),2,(0,0,255),3)
+          
+            # text showing what color is the circle.
+            cv2.putText(bordas_color,'Magenta',(i[0], i[1]), font, 1,(255,0,255),2,cv2.LINE_AA)
+
+            
+    center_mag = tuple([xm, ym])
+   
+    circles_cya = None
+    xc = None
+    yc = None
+    circles_c = cv2.HoughCircles(bordas_c,cv2.HOUGH_GRADIENT,2,40,param1=50,param2=100,minRadius=5,maxRadius=60)
+
+    if circles_c is not None:        
+        circles_c = np.uint16(np.around(circles_c))
+        for i in circles_c[0,:]:
+            xc = i[0]
+            yc = i[1]
+
+            # draw the outer circle
+            cv2.circle(bordas_color,(i[0],i[1]),i[2],(255,255,0),2)
             # draw the center of the circle
             cv2.circle(bordas_color,(i[0],i[1]),2,(0,0,255),3)
 
-    # Draw a diagonal blue line with thickness of 5 px
-    # cv2.line(img, pt1, pt2, color[, thickness[, lineType[, shift]]])
-    cv2.line(bordas_color,(0,0),(511,511),(255,0,0),5)
+            # text showing what color is the circle.
+            cv2.putText(bordas_color,'Ciano',(i[0], i[1]), font, 1,(255,255,0),2,cv2.LINE_AA)
 
-    # cv2.rectangle(img, pt1, pt2, color[, thickness[, lineType[, shift]]])
-    cv2.rectangle(bordas_color,(384,0),(510,128),(0,255,0),3)
+            
+    center_cyan = tuple([xc, yc])
+    
+    
+    ang = None
+
+    if center_mag[0] != None and center_mag[1] != None or center_cyan[0] != None and center_cyan[1] != None:
+        try:
+            cv2.line(bordas_color, center_mag, center_cyan, (255, 255, 255), 6)
+            h=abs(center_mag[1] - center_cyan[1] + center_mag[0] - center_cyan[0])
+            d = (H*f)/h
+            cv2.putText(bordas_color,'Distance -> %.1f' %d,(0,300), cv2.FONT_HERSHEY_SIMPLEX, 1,(255,255,255),2,cv2.LINE_AA)
+            ang = math.atan((ym - yc) / (xm - xc))
+        except:
+            pass
+
+    if ang != None:
+        cv2.putText(bordas_color,'Angle -> %.1f' % (math.degrees(ang)),(0,450), cv2.FONT_HERSHEY_SIMPLEX, 1,(255,255,255),2,cv2.LINE_AA)
 
     # cv2.putText(img, text, org, fontFace, fontScale, color[, thickness[, lineType[, bottomLeftOrigin]]])
     font = cv2.FONT_HERSHEY_SIMPLEX
     cv2.putText(bordas_color,'Press q to quit',(0,50), font, 1,(255,255,255),2,cv2.LINE_AA)
-
-    #More drawing functions @ http://docs.opencv.org/2.4/modules/core/doc/drawing_functions.html
-
+    
     # Display the resulting frame
     cv2.imshow('Detector de circulos',bordas_color)
     if cv2.waitKey(1) & 0xFF == ord('q'):

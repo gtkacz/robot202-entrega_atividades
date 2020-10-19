@@ -90,7 +90,7 @@ def detect(frame):
 
 
 
-
+counter = 0
 import cv2
 
 #cap = cv2.VideoCapture('hall_box_battery_1024.mp4')
@@ -100,12 +100,25 @@ print("Known classes")
 print(CLASSES)
 
 while(True):
+    
     # Capture frame-by-frame
     ret, frame = cap.read()
     
     result_frame, result_tuples = detect(frame)
+            
+  
 
-
+    """
+    O objeto escolhido foi 'person'
+    """
+    for tuplas in result_tuples:
+        if tuplas[0] == "person":
+            counter += 1
+            print(counter)
+        if counter >= 5:
+            cv2.rectangle(result_frame, (tuplas[2][0]+15, tuplas[2][1]+15), (tuplas[3][0]+15, tuplas[3][1]+15), (255, 255, 0), 2)
+            
+        
     # Display the resulting frame
     cv2.imshow('frame',result_frame)
 
