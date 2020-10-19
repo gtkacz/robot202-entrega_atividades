@@ -41,6 +41,7 @@ def posicao_odometry(msg):
 def callback(msg):
     global andar_frente
     global chegou
+    global dist
     lista_distancias=list(msg.ranges)
     contador_parar=0 
 
@@ -49,11 +50,9 @@ def callback(msg):
         if (i < 21 or i > 339) and str(dist) != "inf":
             print(dist)
 
-            if dist <= 0.25:
-                contador_parar += 1
-                if contador_parar >= 5:
-                    print("PARA TUDO")
-                    chegou = True
+        if dist <= 0.35:
+            print("PARA TUDO")
+            chegou = True
 
  
     contador_parar = 0
@@ -94,12 +93,14 @@ if __name__=="__main__":
     is_centralizando = True
     contador_centralizacao = 0 
     girando_direita_t1, girando_direita_t2 = False, False
+
     while not rospy.is_shutdown():
+        rospy.sleep(2.0)
         if not chegou:
             if is_centralizando: 
                 if len(media) != 0 and len(centro) != 0:
                     contador_deteccao_creeper += 1
-                    if contador_deteccao_creeper >= 10:
+                    if contador_deteccao_creeper >= 5:
                         detectou = True
     
                 if detectou and media[0] > centro[0]:
@@ -119,17 +120,24 @@ if __name__=="__main__":
                 vel = Twist(Vector3(0,0,0), Vector3(0,0, w)) 
                 vel_saida.publish(vel)
                 rospy.sleep(0.1)
-    
+
             else:
                 if andar_frente:
                     vel = Twist(Vector3(v,0,0), Vector3(0,0, 0)) 
                     vel_saida.publish(vel)
-                    rospy.sleep(3)
+                    rospy.sleep(3.4)
     
                     is_centralizando = True
                     contador_centralizacao = 0 
-                    w = .4
+                    w = 0.4
+
+        elif dist <= 0.35:
+            print("Parou!")
+            vel = Twist(Vector3(0,0,0), Vector3(0,0,0))
+            vel_saida.publish(vel)
+            rospy.sleep(0.4)
+            
         else:
             vel = Twist(Vector3(0,0,0), Vector3(0,0,0))
             vel_saida.publish(vel)
-            rospy.sleep(0.2)
+            rospy.sleep(0.4)
