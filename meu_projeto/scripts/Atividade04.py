@@ -39,7 +39,7 @@ def posicao_odometry(msg):
 
 
 def callback(msg):
-    global andar_frente
+    global reto
     global chegou
     global dist
     lista_distancias=list(msg.ranges)
@@ -47,16 +47,12 @@ def callback(msg):
 
     for i in range(len(lista_distancias)):
         dist = lista_distancias[i]
-        if (i < 21 or i > 339) and str(dist) != "inf":
-            print(dist)
-
         if dist <= 0.35:
-            print("PARA TUDO")
             chegou = True
 
  
     contador_parar = 0
-    andar_frente = True 
+    reto = True 
 
 def roda_todo_frame(img):
     global cv_image
@@ -67,16 +63,15 @@ def roda_todo_frame(img):
         cv_image = bridge.compressed_imgmsg_to_cv2(img, "bgr8")
         media, centro, maior_area = identifica_cor(cv_image)
     except CvBridgeError as e:
-        print("Problema no rospy: ", e)
+        print("ex", e)
 
 cv_image = None
 media, centro = [], []
-area = 0.1
-andar_frente = False
+reto = False
 w=0.3
 v=0.3
 
-contador_deteccao_creeper = 1
+c = 1
         
 if __name__=="__main__":
 
@@ -90,17 +85,18 @@ if __name__=="__main__":
     detectou = False
     vel = Twist(Vector3(0,0,0), Vector3(0,0,w))
     
-    is_centralizando = True
-    contador_centralizacao = 0 
-    girando_direita_t1, girando_direita_t2 = False, False
+    cntr = True
+    i = 0 
+    girando_direita_t1=False 
+    girando_direita_t2=False
 
     while not rospy.is_shutdown():
         rospy.sleep(2.0)
         if not chegou:
-            if is_centralizando: 
+            if cntr: 
                 if len(media) != 0 and len(centro) != 0:
-                    contador_deteccao_creeper += 1
-                    if contador_deteccao_creeper >= 5:
+                    c += 1
+                    if c >= 5:
                         detectou = True
     
                 if detectou and media[0] > centro[0]:
@@ -111,9 +107,9 @@ if __name__=="__main__":
     
                 if girando_direita_t1 != girando_direita_t2:
                     w /= -2
-                    contador_centralizacao += 1
-                    if contador_centralizacao >= 8:
-                        is_centralizando = False
+                    i += 1
+                    if i >= 8:
+                        cntr = False
                         rospy.sleep(1)
     
                 girando_direita_t2 = girando_direita_t1
@@ -122,17 +118,16 @@ if __name__=="__main__":
                 rospy.sleep(0.1)
 
             else:
-                if andar_frente:
+                if reto:
                     vel = Twist(Vector3(v,0,0), Vector3(0,0, 0)) 
                     vel_saida.publish(vel)
                     rospy.sleep(3.4)
     
-                    is_centralizando = True
-                    contador_centralizacao = 0 
+                    cntr = True
+                    i = 0 
                     w = 0.4
 
         elif dist <= 0.35:
-            print("Parou!")
             vel = Twist(Vector3(0,0,0), Vector3(0,0,0))
             vel_saida.publish(vel)
             rospy.sleep(0.4)
