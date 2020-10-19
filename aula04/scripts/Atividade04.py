@@ -23,8 +23,6 @@ bridge = CvBridge()
 x=None
 y=None
 
-
-diminuir_velocidade=False
 chegou=False
 
 def posicao_odometry(msg):
@@ -97,7 +95,6 @@ if __name__=="__main__":
     contador_centralizacao = 0 
     girando_direita_t1, girando_direita_t2 = False, False
     while not rospy.is_shutdown():
-        # vel = Twist(Vector3(0,0,0), Vector3(0,0,0))
         if not chegou:
             if is_centralizando: 
                 if len(media) != 0 and len(centro) != 0:
@@ -107,16 +104,13 @@ if __name__=="__main__":
     
                 if detectou and media[0] > centro[0]:
                     girando_direita_t1 = True
-                    # print(centro)
     
                 elif detectou and media[0] < centro[0]:
                     girando_direita_t1 = False
-                    # print(centro)
     
                 if girando_direita_t1 != girando_direita_t2:
                     w /= -2
                     contador_centralizacao += 1
-                    print(contador_centralizacao)
                     if contador_centralizacao >= 8:
                         is_centralizando = False
                         rospy.sleep(1)
@@ -125,17 +119,14 @@ if __name__=="__main__":
                 vel = Twist(Vector3(0,0,0), Vector3(0,0, w)) 
                 vel_saida.publish(vel)
                 rospy.sleep(0.1)
-                #print("centralizando")
     
             else:
-                # print('centralizou')
-                if andar_frente:#andar_frente:
+                if andar_frente:
                     vel = Twist(Vector3(v,0,0), Vector3(0,0, 0)) 
                     vel_saida.publish(vel)
                     rospy.sleep(3)
     
                     is_centralizando = True
-                    print('comeca a centralizar')
                     contador_centralizacao = 0 
                     w = .4
         else:
