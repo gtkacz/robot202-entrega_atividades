@@ -50,7 +50,6 @@ def callback(msg):
         if dist <= 0.35:
             chegou = True
 
- 
     contador_parar = 0
     reto = True 
 
@@ -70,7 +69,6 @@ media, centro = [], []
 reto = False
 w=0.3
 v=0.3
-
 c = 1
         
 if __name__=="__main__":
@@ -87,8 +85,8 @@ if __name__=="__main__":
     
     cntr = True
     i = 0 
-    girando_direita_t1=False 
-    girando_direita_t2=False
+    dir1=False 
+    dir2=False
 
     while not rospy.is_shutdown():
         rospy.sleep(2.0)
@@ -97,22 +95,22 @@ if __name__=="__main__":
                 if len(media) != 0 and len(centro) != 0:
                     c += 1
                     if c >= 5:
-                        detectou = True
+                        detectou=True
     
                 if detectou and media[0] > centro[0]:
-                    girando_direita_t1 = True
+                    dir1=True
     
                 elif detectou and media[0] < centro[0]:
-                    girando_direita_t1 = False
+                    dir1=False
     
-                if girando_direita_t1 != girando_direita_t2:
+                if dir1!=dir2:
                     w /= -2
                     i += 1
                     if i >= 8:
                         cntr = False
                         rospy.sleep(1)
     
-                girando_direita_t2 = girando_direita_t1
+                dir2=dir1
                 vel = Twist(Vector3(0,0,0), Vector3(0,0, w)) 
                 vel_saida.publish(vel)
                 rospy.sleep(0.1)
@@ -122,7 +120,6 @@ if __name__=="__main__":
                     vel = Twist(Vector3(v,0,0), Vector3(0,0, 0)) 
                     vel_saida.publish(vel)
                     rospy.sleep(3.4)
-    
                     cntr = True
                     i = 0 
                     w = 0.4
