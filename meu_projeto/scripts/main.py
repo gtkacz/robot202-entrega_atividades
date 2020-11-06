@@ -79,7 +79,7 @@ c = 1
         
 if __name__=="__main__":
 
-    rospy.init_node("Atividade04")
+    rospy.init_node("Projeto")
     topico_img = "/camera/rgb/image_raw/compressed"
     odom_sub = rospy.Subscriber("/odom", Odometry, posicao_odometry)
     recebe_img = rospy.Subscriber(topico_img, CompressedImage, roda_todo_frame, queue_size=4, buff_size=2**24)
