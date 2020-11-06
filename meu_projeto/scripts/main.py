@@ -3,7 +3,7 @@
 
 from __future__ import print_function, division
 
-__author__ = ["Gabriel Mitelman Tkacz", "Rafael Selcali Malcervelli"]
+__author__ = ["Gabriel Mitelman Tkacz", "Rafael Selcali Malcervelli", "Enrico Venturini Costa"]
 
 import rospy
 import numpy as np
