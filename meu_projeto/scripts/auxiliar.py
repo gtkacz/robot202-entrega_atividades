@@ -53,7 +53,7 @@ def colorFilter(bgr, low, high):
     return mask  
 
 def massCenterColor(img_bgr_limpa, str_cor, img_bgr_visivel):
-    hsv_low, hsv_high = masks.criar_valores_mascaras(str_cor)
+    hsv_low, hsv_high = masks.maskValues(str_cor)
     color_mask = colorFilter(img_bgr_limpa, hsv_low, hsv_high)
 
     if str_cor == "amarelo":
@@ -79,11 +79,11 @@ def direction(img_bgr_limpa, str_cor, img_bgr_visivel):
         x_centro  = cm[0]
 
         if x_centro < centro - incerteza:
-            return "virar para a esquerda"
+            return "turn left"
         elif x_centro > centro + incerteza:
-            return "virar para a direita"
+            return "turn right"
         else:
-            return "reto"
+            return "straight"
 
     except:
         return "perdeu pista"
@@ -126,7 +126,7 @@ def restrictWindow(img_bgr_limpa, list_xo_y0):
     return clipped
 
 def searchCreeper(img_bgr_limpa, cor_creeper, img_bgr_visivel): 
-    hsv_low, hsv_high  = masks.criar_valores_mascaras(cor_creeper)
+    hsv_low, hsv_high  = masks.maskValues(cor_creeper)
     is_creeper_visible = False
     color_mask_creeper = colorFilter(img_bgr_limpa, hsv_low, hsv_high)
 

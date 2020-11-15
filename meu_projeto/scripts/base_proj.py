@@ -1,12 +1,14 @@
 #! /usr/bin/env python
 # -*- coding:utf-8 -*-
-
 from __future__ import print_function, division
+
+__author__ = ["Gabriel Mitelman Tkacz", "Rafael Selcali Malcervelli", "Enrico Venturini Costa"]
+
 import numpy as np
 import numpy
-import tf, math, cv2, time, visao_module, rospy
+import tf, math, cv2, time, visao_module, rospy, cormodule
 from nav_msgs.msg import Odometry
-from sensor_msgs.msg import Image, CompressedImage
+from sensor_msgs.msg import Image, CompressedImage, LaserScan
 from cv_bridge import CvBridge, CvBridgeError
 from numpy import linalg
 from tf import transformations
@@ -16,28 +18,7 @@ from geometry_msgs.msg import Twist, Vector3, Pose, Vector3Stamped
 from nav_msgs.msg import Odometry
 from std_msgs.msg import Header
 import cv_bridge
-
-class Follower:
-  def __init__(self):
-    self.bridge = cv_bridge.CvBridge()
-    cv2.namedWindow("window", 1)
-    self.image_sub = rospy.Subscriber("/camera/image/compressed", Image, self.image_callback)
-
-  def image_callback(self, msg):
-    # BEGIN BRIDGE
-    image = self.bridge.compressed_imgmsg_to_cv2(msg)
-    # END BRIDGE
-    # BEGIN HSV
-    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-    # END HSV
-    # BEGIN FILTER
-    lower_yellow = numpy.array([ 50,  50, 170])
-    upper_yellow = numpy.array([255, 255, 190])
-    mask = cv2.inRange(hsv, lower_yellow, upper_yellow)
-    # END FILTER
-    masked = cv2.bitwise_and(image, image, mask=mask)
-    cv2.imshow("window", mask ) 
-    cv2.waitKey(3)
+import auxiliar
 
 bridge = CvBridge()
 
@@ -59,6 +40,7 @@ x = 0
 y = 0
 z = 0 
 id = 0
+direcao = None
 
 frame = "camera_link"
 
@@ -68,11 +50,13 @@ tf_buffer = tf2_ros.Buffer()
 
 # A função a seguir é chamada sempre que chega um novo frame
 def roda_todo_frame(imagem):
-    print("frame")
     global cv_image
     global media
     global centro
     global resultados
+    global state
+    global vel
+    global direcao
 
     now = rospy.get_rostime()
     imgtime = imagem.header.stamp
@@ -83,52 +67,96 @@ def roda_todo_frame(imagem):
         print("Descartando por causa do delay do frame:", delay)
         return 
     try:
-        follower = Follower()
         antes = time.clock()
         temp_image = bridge.compressed_imgmsg_to_cv2(imagem, "bgr8")
-        # Note que os resultados já são guardados automaticamente na variável
-        # chamada resultados
-        centro, saida_net, resultados =  visao_module.processa(temp_image)        
-        for r in resultados:
-            # print(r) - print feito para documentar e entender
-            # o resultado            
-            pass
+        imagem1 = temp_image.copy()
+        
+        media, centro, maior_area = cormodule.identifica_cor(imagem1)
+        isCreeper, cmCreeper = auxiliar.searchCreeper(temp_image, cor_creeper, imagem1)
+        centro, saida_net, resultados =  visao_module.processa(imagem1)       
+
+        direcao = auxiliar.direction(temp_image, cor_pista, imagem1)
 
         depois = time.clock()
-        # Desnecessário - Hough e MobileNet já abrem janelas
-        cv_image = saida_net.copy()
-        cv2.imshow("cv_image", cv_image)
+        cv2.imshow("cv img", imagem1)
         cv2.waitKey(1)
     except CvBridgeError as e:
         print('ex', e)
+
+x=None
+y=None
+
+chegou=False
+
+def posicao_odometry(msg):
+    global x
+    global y
+
+    x = msg.pose.pose.position.x
+    y = msg.pose.pose.position.y
+
+    quat = msg.pose.pose.orientation
+    lista = [quat.x, quat.y, quat.z, quat.w]
+    angulos_rad = transformations.euler_from_quaternion(lista)
+    angs_degree = np.degrees(angulos_rad)
+
+
+def callback(msg):
+    global reto
+    global chegou
+    global dist
+    lista_distancias=list(msg.ranges)
+    contador_parar=0 
+
+    for i in range(len(lista_distancias)):
+        dist = lista_distancias[i]
+        if dist <= 0.35:
+            chegou = True
+
+    contador_parar = 0
+    reto = True 
+
+cv_image = None
+media, centro = [], []
+reto = False
+w=0.3
+v=0.3
+c = 1
+cor_creeper = "blue"  
+cor_pista     = "yellow" 
     
 if __name__=="__main__":
-    rospy.init_node("cor")
-    
 
-    topico_imagem = "/camera/image/compressed"
-
-    recebedor = rospy.Subscriber(topico_imagem, CompressedImage, roda_todo_frame, queue_size=4, buff_size = 2**24)
-
-
-    print("Usando ", topico_imagem)
-
-    velocidade_saida = rospy.Publisher("/cmd_vel", Twist, queue_size = 1)
-
+    rospy.init_node("Projeto")
+    topico_img = "/camera/image/compressed"
+    odom_sub = rospy.Subscriber("/odom", Odometry, posicao_odometry)
+    recebe_img = rospy.Subscriber(topico_img, CompressedImage, roda_todo_frame, queue_size=4, buff_size=2**24)
+    scanner    = rospy.Subscriber("/scan", LaserScan, callback)
+    vel_saida  = rospy.Publisher("/cmd_vel", Twist, queue_size=3) 
     tfl = tf2_ros.TransformListener(tf_buffer) #conversao do sistema de coordenadas 
     tolerancia = 25
+
+    vel = Twist(Vector3(0.2,0,0), Vector3(0,0, 0))
+    left = Twist(Vector3(0,0,0), Vector3(0,0, math.pi/15))
+    right = Twist(Vector3(0,0,0), Vector3(0,0, -math.pi/15))
+
 
     # Exemplo de categoria de resultados
     # [('chair', 86.965459585189819, (90, 141), (177, 265))]
 
     try:
-        # Inicializando - por default gira no sentido anti-horário
-        vel = Twist(Vector3(0,0,0), Vector3(0,0,math.pi/10.0))
-        
+        rospy.sleep(2.0)
         while not rospy.is_shutdown():
             for r in resultados:
                 print(r)
-            velocidade_saida.publish(vel)
+            vel_saida.publish(vel)
+
+            if direcao == "turn left":
+                vel_saida.publish(left)
+            elif direcao == "turn right":
+                vel_saida.publish(right)
+            elif direcao == "straight":
+                vel_saida.publish(vel)
 
             rospy.sleep(0.1)
 
