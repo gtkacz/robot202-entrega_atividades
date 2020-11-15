@@ -34,7 +34,7 @@ area = 0.0 # Variavel com a area do maior contorno
 # Descarta imagens que chegam atrasadas demais
 check_delay = False 
 
-resultados = [] # Criacao de uma variavel global para guardar os resultados vistos
+resultados = []
 
 x = 0
 y = 0
@@ -48,7 +48,6 @@ tfl = 0
 
 tf_buffer = tf2_ros.Buffer()
 
-# A função a seguir é chamada sempre que chega um novo frame
 def roda_todo_frame(imagem):
     global cv_image
     global media
@@ -60,9 +59,8 @@ def roda_todo_frame(imagem):
 
     now = rospy.get_rostime()
     imgtime = imagem.header.stamp
-    lag = now-imgtime # calcula o lag
+    lag = now-imgtime
     delay = lag.nsecs
-    # print("delay ", "{:.3f}".format(delay/1.0E9))
     if delay > atraso and check_delay==True:
         print("Descartando por causa do delay do frame:", delay)
         return 
@@ -140,9 +138,6 @@ if __name__=="__main__":
     left = Twist(Vector3(0,0,0), Vector3(0,0, math.pi/15))
     right = Twist(Vector3(0,0,0), Vector3(0,0, -math.pi/15))
 
-
-    # Exemplo de categoria de resultados
-    # [('chair', 86.965459585189819, (90, 141), (177, 265))]
 
     try:
         rospy.sleep(2.0)
