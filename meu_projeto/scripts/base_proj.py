@@ -19,6 +19,7 @@ from nav_msgs.msg import Odometry
 from std_msgs.msg import Header
 import cv_bridge
 import auxiliar
+import pandas as pd
 
 bridge = CvBridge()
 
@@ -48,7 +49,7 @@ tfl = 0
 
 tf_buffer = tf2_ros.Buffer()
 
-def roda_todo_frame(imagem):
+def roda_todo_frame(img):
     global cv_image
     global media
     global centro
@@ -58,25 +59,24 @@ def roda_todo_frame(imagem):
     global direcao
 
     now = rospy.get_rostime()
-    imgtime = imagem.header.stamp
+    imgtime = img.header.stamp
     lag = now-imgtime
     delay = lag.nsecs
+
     if delay > atraso and check_delay==True:
         print("Descartando por causa do delay do frame:", delay)
         return 
     try:
-        antes = time.clock()
-        temp_image = bridge.compressed_imgmsg_to_cv2(imagem, "bgr8")
-        imagem1 = temp_image.copy()
+        temp_image = bridge.compressed_imgmsg_to_cv2(img, "bgr8")
+        img1 = temp_image.copy()
         
-        media, centro, maior_area = cormodule.identifica_cor(imagem1)
-        isCreeper, cmCreeper = auxiliar.searchCreeper(temp_image, cor_creeper, imagem1)
-        centro, saida_net, resultados =  visao_module.processa(imagem1)       
+        media, centro, maior_area = cormodule.identifica_cor(img1)
+        isCreeper, cmCreeper = auxiliar.searchCreeper(temp_image, cor_creeper, img1)
+        centro, saida_net, resultados =  visao_module.processa(img1)       
 
-        direcao = auxiliar.direction(temp_image, cor_pista, imagem1)
+        direcao = auxiliar.direction(temp_image, cor_pista, img1)
 
-        depois = time.clock()
-        cv2.imshow("cv img", imagem1)
+        cv2.imshow("cv img", img1)
         cv2.waitKey(1)
     except CvBridgeError as e:
         print('ex', e)
@@ -119,7 +119,7 @@ media, centro = [], []
 reto = False
 w=0.3
 v=0.3
-c = 1
+c=1
 cor_creeper = "blue"  
 cor_pista     = "yellow" 
     
@@ -137,6 +137,13 @@ if __name__=="__main__":
     vel = Twist(Vector3(0.2,0,0), Vector3(0,0, 0))
     left = Twist(Vector3(0,0,0), Vector3(0,0, math.pi/15))
     right = Twist(Vector3(0,0,0), Vector3(0,0, -math.pi/15))
+
+    detectou = False
+
+    cntr = True
+    i = 0 
+    dir1=False 
+    dir2=False
 
 
     try:

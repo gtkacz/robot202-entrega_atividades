@@ -5,6 +5,10 @@ from ipywidgets import widgets, interact, interactive, FloatSlider, IntSlider
 import numpy as np
 import cv2, masks
 from geometry_msgs.msg import Twist, Vector3
+import pandas as pd
+
+delta=15
+pos_c=160
 
 def convertToTuple(html_color):
     colors = html_color.split("#")[1]
@@ -52,11 +56,11 @@ def colorFilter(bgr, low, high):
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
     return mask  
 
-def massCenterColor(img_bgr_limpa, str_cor, img_bgr_visivel):
-    hsv_low, hsv_high = masks.maskValues(str_cor)
+def massCenterColor(img_bgr_limpa, color, img_bgr_visivel, target):
+    hsv_low, hsv_high = masks.maskValues(color)
     color_mask = colorFilter(img_bgr_limpa, hsv_low, hsv_high)
 
-    if str_cor == "amarelo":
+    if color == target:
         color_mask = restrictWindowSize(img_bgr_limpa, color_mask, img_bgr_visivel, [30,60])
 
     posicao_centro_massa = massCenter(color_mask) 
@@ -73,14 +77,14 @@ def restrictWindowSize(img_bgr_limpa, mascara, img_bgr_visivel, list_xo_y0):
     cv2.rectangle(img_bgr_visivel, (x0, y0), (x1, y1), (255,0,0),2,cv2.LINE_AA) 
     return clipped
 
-def direction(img_bgr_limpa, str_cor, img_bgr_visivel):
+def direction(img_bgr_limpa, color, img_bgr_visivel):
     try:
-        cm = massCenterColor(img_bgr_limpa, str_cor, img_bgr_visivel)
+        cm = massCenterColor(img_bgr_limpa, color, img_bgr_visivel)
         x_centro  = cm[0]
 
-        if x_centro < centro - incerteza:
+        if x_centro < pos_c - delta:
             return "turn left"
-        elif x_centro > centro + incerteza:
+        elif x_centro > pos_c + delta:
             return "turn right"
         else:
             return "straight"
@@ -138,19 +142,23 @@ def searchCreeper(img_bgr_limpa, cor_creeper, img_bgr_visivel):
     except:
         return is_creeper_visible, (0,0)      
 
-incerteza = 15
-centro    = 160
 def moveToCreeper(posicao_centro_massa_creeper):
     try:
         x_centro  = posicao_centro_massa_creeper[0]
 
-        if x_centro < centro - incerteza:
+        if x_centro < pos_c - delta:
             return "virar esquerda"
-        elif x_centro > centro + incerteza:
+        elif x_centro > pos_c + delta:
             return "virar direita"
         else:
             return "seguir reto"
 
     except:
         return "perdeu pista"
+
+def colorPicker(color, df):
+    colors={}
+    for index, row in df.iterrows():
+        colors[row['Color']]=row['Code']
+    return (str(colors.get(color)))
 
