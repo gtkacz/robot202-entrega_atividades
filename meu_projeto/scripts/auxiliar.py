@@ -1,16 +1,60 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 
+print("Este script não deve ser executado diretamente")
+
 from ipywidgets import widgets, interact, interactive, FloatSlider, IntSlider
 import numpy as np
-import cv2, masks
-from geometry_msgs.msg import Twist, Vector3
-import pandas as pd
+import cv2
 
-delta=15
-pos_c=160
+def make_widgets_mat(m, n):
+    """
+        Makes a m rows x n columns 
+        matriz of  integer Jupyter Widgets
+        all values initialized to zero
+    """
+    list_elements = []
+    for i in range(m):
+        row = []
+        for j in range(n):
+            row.append(widgets.IntText(value=0))
+        list_elements.append(row)
 
-def convertToTuple(html_color):
+    rows = []
+    for row in list_elements:
+        rows.append(widgets.HBox(row))
+
+    widgets_mat = widgets.VBox(rows)
+
+    return list_elements, widgets_mat
+
+def make_widgets_mat_from_data(data):
+    """
+        Creates a matriz of int Widgets given 2D-data
+    """
+    n = len(data)
+    m = len(data[0])
+    elements, mat = makeMat(n, m)
+    for i in range(n):
+        for j in range(m):
+            elements[i][j].value = data[i][j]
+    return elements, mat
+
+def make_np_from_widgets_list(widgets_list):
+    """
+        Takes as input a list of lists of widgets and initializes a matrix
+    """
+    widgets = widgets_list
+    n = len(widgets)
+    m = len(widgets[0])
+    array = np.zeros((n,m), dtype=np.float32)
+    for i in range(n):
+        for j in range(m):
+            array[i][j] = widgets[i][j].value
+    return array
+
+
+def convert_to_tuple(html_color):
     colors = html_color.split("#")[1]
     r = int(colors[0:2],16)
     g = int(colors[2:4],16)
@@ -24,13 +68,13 @@ def to_1px(tpl):
     img[0,0,2] = tpl[2]
     return img
 
-def toHsv(html_color):
-    tupla = convertToTuple(html_color)
+def to_hsv(html_color):
+    tupla = convert_to_tuple(html_color)
     hsv = cv2.cvtColor(to_1px(tupla), cv2.COLOR_RGB2HSV)
     return hsv[0][0]
 
 def ranges(value):
-    hsv = toHsv(value)
+    hsv = to_hsv(value)
     hsv2 = np.copy(hsv)
     hsv[0] = max(0, hsv[0]- 30)
     hsv2[0] = min(180, hsv[0]+ 30)
@@ -38,10 +82,65 @@ def ranges(value):
     hsv2[1:] = 255
     return hsv, hsv2
 
-def massCenter(mask):
+def colorNameToValue(color):
+    if color == 'blue':
+        return '#'
+    elif color == 'orange':
+        return '#'
+    elif color == 'pink':
+        return '#'
+
+def identifica_pista(bgr, color):
+    centro = (bgr.shape[1]//2, bgr.shape[0]//2)
+    low, high = ranges(color)
+    # Valores para amarelo usando um color picker
+    # mascara amarela
+    low = np.array([22, 50, 50],dtype=np.uint8)
+    high = np.array([36, 255, 255],dtype=np.uint8)
+    hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
+    mask = cv2.inRange(hsv, low, high)
+    
+
+    # Encontramos os contornos na máscara e selecionamos o de maior área
+    contornos, arvore = cv2.findContours(mask.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE) 
+    
+
+    maior_contorno = None
+    maior_contorno_area = 0
+
+    for cnt in contornos:
+        area = cv2.contourArea(cnt)
+        if area > maior_contorno_area:
+            maior_contorno = cnt
+            maior_contorno_area = area
+
+    media = None
+    if not maior_contorno is None:
+        try:
+            p = center_of_mass(maior_contorno) # centro de massa
+            crosshair(bgr, p, 20, (128,128,0))
+            maior_contorno = np.reshape(maior_contorno, (maior_contorno.shape[0], 2))
+            media = maior_contorno.mean(axis=0)
+            media = media.astype(np.int32)
+        
+        except:
+            p = centro
+            crosshair(bgr, p, 20, (128,128,0))
+
+    def booleanContornos(maior_contorno):
+        if maior_contorno_area > 100:
+            return True
+        else:
+            return False
+
+    
+    return media, centro, booleanContornos(maior_contorno)
+
+def center_of_mass(mask):
     M = cv2.moments(mask)
     cX = int(M["m10"] / M["m00"])
     cY = int(M["m01"] / M["m00"])
+
     return [int(cX), int(cY)]
 
 def crosshair(img, point, size, color):
@@ -49,116 +148,12 @@ def crosshair(img, point, size, color):
     cv2.line(img,(x - size,y),(x + size,y),color,5)
     cv2.line(img,(x,y - size),(x, y + size),color,5)
 
-def colorFilter(bgr, low, high):
-    hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
-    mask = cv2.inRange(hsv, low, high)
-    kernel = np.ones((5,5),np.uint8)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
-    return mask  
+def center_of_mass_region(mask, x1, y1, x2, y2):
+    mask_bgr = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
+    clipped = mask[y1:y2, x1:x2]
+    c = center_of_mass(clipped)
+    c[0]+=x1
+    c[1]+=y1
+    crosshair(mask_bgr, c, 10, (0,0,255))
 
-def massCenterColor(img_bgr_limpa, color, img_bgr_visivel, target):
-    hsv_low, hsv_high = masks.maskValues(color)
-    color_mask = colorFilter(img_bgr_limpa, hsv_low, hsv_high)
-
-    if color == target:
-        color_mask = restrictWindowSize(img_bgr_limpa, color_mask, img_bgr_visivel, [30,60])
-
-    posicao_centro_massa = massCenter(color_mask) 
-    desenha_centro = crosshair(img_bgr_visivel, posicao_centro_massa, 8, (255,0,255))
-    return posicao_centro_massa
-
-def restrictWindowSize(img_bgr_limpa, mascara, img_bgr_visivel, list_xo_y0):
-    x0 = list_xo_y0[0]
-    y0 = 90
-    x1 = img_bgr_limpa.shape[1] - 10
-    y1 = img_bgr_limpa.shape[0] - 20
-
-    clipped = mascara[y0:y1, x0:x1]
-    cv2.rectangle(img_bgr_visivel, (x0, y0), (x1, y1), (255,0,0),2,cv2.LINE_AA) 
-    return clipped
-
-def direction(img_bgr_limpa, color, img_bgr_visivel):
-    try:
-        cm = massCenterColor(img_bgr_limpa, color, img_bgr_visivel)
-        x_centro  = cm[0]
-
-        if x_centro < pos_c - delta:
-            return "turn left"
-        elif x_centro > pos_c + delta:
-            return "turn right"
-        else:
-            return "straight"
-
-    except:
-        return "perdeu pista"
-
-def moveToCenterOfMass(qual_direcao, velocidade_atual, vel_lin, vel_ang):
-    if   qual_direcao == "seguir reto":
-        velocidade_atual.angular.z = 0
-        if velocidade_atual.linear.x <= 0.2:
-            velocidade_atual.linear.x = 0.25
-        if velocidade_atual.linear.x <= 2*vel_lin:
-            velocidade_atual.linear.x += 0.1*vel_lin
-        return velocidade_atual
-
-    elif qual_direcao == "virar direita":
-        velocidade_atual.angular.z = -vel_ang
-        return velocidade_atual
-
-    elif qual_direcao == "virar esquerda":
-        velocidade_atual.angular.z = vel_ang
-        return velocidade_atual
-
-    elif qual_direcao == "perdeu pista":
-        velocidade_atual.linear.x = 0
-        velocidade_atual.angular.z = -3*vel_ang
-        return velocidade_atual
-
-    elif qual_direcao == 'rotate_until_is_creeper_visible':
-        velocidade_atual.linear.x = 0
-        velocidade_atual.angular.z = -3*vel_ang
-        
-        return velocidade_atual
-
-def restrictWindow(img_bgr_limpa, list_xo_y0):
-    x0 = list_xo_y0[0]
-    y0 = list_xo_y0[1]
-    x1 = img_bgr_limpa.shape[1] - 10
-    y1 = img_bgr_limpa.shape[0] - y0
-
-    clipped = img_bgr_limpa[y0:y1, x0:x1]
-    return clipped
-
-def searchCreeper(img_bgr_limpa, cor_creeper, img_bgr_visivel): 
-    hsv_low, hsv_high  = masks.maskValues(cor_creeper)
-    is_creeper_visible = False
-    color_mask_creeper = colorFilter(img_bgr_limpa, hsv_low, hsv_high)
-
-    try: 
-        posicao_centro_massa_creeper = massCenter(color_mask_creeper) 
-        desenha_centro = crosshair(img_bgr_visivel, posicao_centro_massa_creeper, 8, (255,100,100))
-        is_creeper_visible = True
-        return is_creeper_visible, posicao_centro_massa_creeper
-    except:
-        return is_creeper_visible, (0,0)      
-
-def moveToCreeper(posicao_centro_massa_creeper):
-    try:
-        x_centro  = posicao_centro_massa_creeper[0]
-
-        if x_centro < pos_c - delta:
-            return "virar esquerda"
-        elif x_centro > pos_c + delta:
-            return "virar direita"
-        else:
-            return "seguir reto"
-
-    except:
-        return "perdeu pista"
-
-def colorPicker(color, df):
-    colors={}
-    for index, row in df.iterrows():
-        colors[row['Color']]=row['Code']
-    return (str(colors.get(color)))
-
+    return mask_bgr
