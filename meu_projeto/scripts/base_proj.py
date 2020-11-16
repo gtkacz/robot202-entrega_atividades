@@ -6,7 +6,7 @@ __author__ = ["Gabriel Mitelman Tkacz", "Rafael Selcali Malcervelli", "Enrico Ve
 
 import numpy as np
 import numpy
-import tf, math, cv2, time, visao_module, rospy, cormodule
+import tf, math, cv2, time, rospy
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import Image, CompressedImage, LaserScan
 from cv_bridge import CvBridge, CvBridgeError
@@ -101,8 +101,8 @@ def scaneou(img):
 def go_to(x2, y2, pub):
     delta=math.atan2(y2-y, x2-x)
     ang=delta-theta
-    sleep=ang/w
 
+    sleep=ang/w
     pub.publish(velocityTwistCounterClockwise)
     rospy.sleep(sleep)
 
@@ -204,11 +204,11 @@ def roda_todo_frame(img):
         temp_image = bridge.compressed_imgmsg_to_cv2(img, "bgr8")
         img1 = temp_image.copy()
 
-        centro, saida_net, MobileNetResults =  visao_module.processa(temp_image)        
+        centro, saida_net, MobileNetResults =  auxiliar.processa(temp_image)        
 
         depois = time.clock()
         cv_image = saida_net.copy()
-        avg, center, isTrack =  center_mass.identifica_pista(temp_image, "blue")
+        avg, center, isTrack =  auxiliar.identifica_pista(temp_image, "blue")
         avgCreeper, cmCreeper, isCreeper =  creeper.isCreeper(temp_image, goal[0])
         
         # Identificação do Id

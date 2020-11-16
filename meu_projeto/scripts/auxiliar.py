@@ -14,7 +14,7 @@ from geometry_msgs.msg import Twist, Vector3, Pose
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import Image, CompressedImage
 from cv_bridge import CvBridge, CvBridgeError
-import mobilenet_simples as mnet
+import mobilenet
 
 def make_widgets_mat(m, n):
     """
@@ -100,9 +100,9 @@ def colorNameToValue(color):
         return '#'
 
 def processa(frame):
-    result_frame, result_tuples = mnet.detect(frame)
+    result_frame, result_tuples = mobilenet.detect(frame)
     centro = (frame.shape[1]//2, frame.shape[0]//2)
-    
+
     def cross(img_rgb, point, color, width,length):
         cv2.line(img_rgb, (point[0] - int(length/2), point[1]),  (point[0] + int(length/2), point[1]), color ,width, length)
         cv2.line(img_rgb, (point[0], point[1] - int(length/2)), (point[0], point[1] + int(length/2)),color ,width, length)
@@ -121,9 +121,7 @@ def identifica_cor(frame):
     cor_maior = np.array([180, 255, 255])
     segmentado_cor += cv2.inRange(frame_hsv, cor_menor, cor_maior)
 
-    # Note que a notacão do numpy encara as imagens como matriz, portanto o enderecamento é
-    # linha, coluna ou (y,x)
-    # Por isso na hora de montar a tupla com o centro precisamos inverter, porque
+
     centro = (frame.shape[1]//2, frame.shape[0]//2)
 
 
@@ -236,3 +234,55 @@ def center_of_mass_region(mask, x1, y1, x2, y2):
     crosshair(mask_bgr, c, 10, (0,0,255))
 
     return mask_bgr
+
+maior_contorno = 0
+maior_contorno_area = 0
+
+def identifica_creeper(frame, creeper_color):
+    global maior_contorno
+    global maior_contorno_area
+
+    segmentado_cor = None
+    frame_hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    if creeper_color == "blue":
+        cor_menor, cor_maior = aux.ranges("#0000ff")
+        segmentado_cor = cv2.inRange(frame_hsv, cor_menor, cor_maior)
+
+    elif creeper_color == "pink":
+        cor_menor, cor_maior = aux.ranges("#e60c69")
+        segmentado_cor = cv2.inRange(frame_hsv, cor_menor, cor_maior)
+
+    centro = (frame.shape[1]//2, frame.shape[0]//2)
+
+    def cross(img_rgb, point, color, width,length):
+        cv2.line(img_rgb, (point[0] - length/2, point[1]),  (point[0] + length/2, point[1]), color ,width, length)
+        cv2.line(img_rgb, (point[0], point[1] - length/2), (point[0], point[1] + length/2),color ,width, length) 
+
+    contornos, arvore = cv2.findContours(segmentado_cor.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE) 
+    for cnt in contornos:
+        area = cv2.contourArea(cnt)
+        if area > maior_contorno_area:
+            maior_contorno = cnt
+            maior_contorno_area = area
+
+    def booleanContornos(maior_contorno):
+        if maior_contorno_area > 100:
+            return True
+        else:
+            return False
+
+    media = None
+    if not maior_contorno is None :
+        cv2.drawContours(frame, [maior_contorno], -1, [0, 255, 0], 5)
+        maior_contorno = np.reshape(maior_contorno, (maior_contorno.shape[0], 2))
+        media = maior_contorno.mean(axis=0)
+        media = media.astype(np.int32)
+        cv2.circle(frame, (media[0], media[1]), 5, [0, 255, 0])
+        cross(frame, centro, [0, 255,0], 1, 17)
+    else:
+        media = (0, 0)
+
+    cv2.imshow('seg', segmentado_cor)
+    cv2.waitKey(1)
+
+    return media, centro, booleanContornos(maior_contorno)
