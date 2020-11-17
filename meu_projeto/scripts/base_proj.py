@@ -32,6 +32,7 @@ check_delay=False
 rospack=rospkg.RosPack() 
 tfl = 0
 tf_buffer = tf2_ros.Buffer()
+
 avg=[]
 center=[]
 isTrack=True
@@ -56,15 +57,10 @@ ID=None
 og=None
 match=None
 
-# Máquina de mode
-mode = None
-state = None
-
-# Verificação se creeper já foi identificado
-identificado = False
-
-# Marcação para guardar a posição anterior à identificação do creeper
-flag = True
+creeperIDed=False
+mode=False
+state=False
+flag=True
 
 def posicao_odometry(data):
     global x
@@ -101,7 +97,7 @@ def go_to(x2, y2, pub):
     rospy.sleep(sleep)
 
     
-def meia_volta(pub):
+def halfTurn(pub):
     tempo1 = 0.75 /v
 
     angulo = math.pi
@@ -127,13 +123,13 @@ def direcao_robo_pista():
         velocidade_saida.publish(velocityTrackRight)
 
     if state == 'final da pista':
-        meia_volta(velocidade_saida)
+        halfTurn(velocidade_saida)
 
 
 def controla_garra():
     global mode
     global state
-    global identificado
+    global creeperIDed
 
     if state == 'levanta garra':
         # Depois de estar a uma distancia pre-estabelecida, o creeper levanta o braco e abre a garra
@@ -163,7 +159,7 @@ def controla_garra():
         
     elif state == 'retorna pista':
         go_to(ponto[0], ponto[1], velocidade_saida)
-        identificado = True
+        creeperIDed = True
         mode = 'procurando pista'
         state = ""
 
@@ -251,7 +247,7 @@ if __name__=="main_":
                     mode = 'segue pista'
 
                 # Se eu acho o creeper mudo o mode
-                if isCreeper and identificado==False: 
+                if isCreeper and creeperIDed==False: 
                     mode = 'creeper a la vista'
 
             if mode == 'segue pista':
@@ -280,14 +276,14 @@ if __name__=="main_":
                 if not isTrack:
                     mode = 'procurando pista'
 
-                if isCreeper and identificado==False:
+                if isCreeper and creeperIDed==False:
                     mode = 'creeper a la vista'  
 
                 # Chama a função direção_robo_pista, que seta a velocidade do robô com base nos substados
                 direcao_robo_pista()
                 rospy.sleep(0.01)  
 
-            # Creeper foi identificado
+            # Creeper foi creeperIDed
             if mode == 'creeper a la vista':
 
                 if flag:
@@ -301,7 +297,7 @@ if __name__=="main_":
                     print('rosa here I goooo')
         
                 else:
-                    # Se for verdadeiro (match ID desejado com ID identificado):
+                    # Se for verdadeiro (match ID desejado com ID creeperIDed):
                     if match > 200:
                         mode = 'pega creeper'
                         state = 'levanta garra' #levanto a garra assim que mudo o mode
