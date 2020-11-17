@@ -98,32 +98,32 @@ def go_to(x2, y2, pub):
 
     
 def halfTurn(pub):
-    tempo1 = 0.75 /v
+    ang=math.pi
 
-    angulo = math.pi
-    tempo2 = angulo/w
+    sleepLinear=(0.75/v)
+    sleepAngular=(ang/w)
 
     pub.publish(velocityTwistClockwise)
-    rospy.sleep(tempo2)
+    rospy.sleep(sleepAngular)
 
     pub.publish(velocityTrackForward)
-    rospy.sleep(tempo1)
+    rospy.sleep(sleepLinear)
 
 
-def direcao_robo_pista():
+def direcao_robo_pista(pub):
     global state
 
-    if state == 'frente':
-        velocidade_saida.publish(velocityTrackForward)
+    if state == 'forward':
+        pub.publish(velocityTrackForward)
 
-    if state == 'esquerda':
-        velocidade_saida.publish(velocityTrackLeft)
+    if state == 'left':
+        pub.publish(velocityTrackLeft)
 
-    if state == 'direita':
-        velocidade_saida.publish(velocityTrackRight)
+    if state == 'right':
+        pub.publish(velocityTrackRight)
 
-    if state == 'final da pista':
-        halfTurn(velocidade_saida)
+    if state == 'end':
+        halfTurn(pub)
 
 
 def controla_garra():
@@ -259,15 +259,15 @@ if __name__=="main_":
                     if not chegou:
                         print("Encontrei pista")
                         if (avg[0] > center[0]):
-                            state = 'direita'
+                            state = 'right'
                         elif (avg[0] < center[0]):
-                            state = 'esquerda'
+                            state = 'left'
                         else:
-                            state = 'frente'
+                            state = 'forward'
 
                     else: #quando ve o final da pista vira 180 e anda 0.8 pra frente
                         print("Encontrei algum obstáculo")
-                        state = 'final da pista'
+                        state = 'end'
                 except:
                     pass
 
@@ -280,7 +280,7 @@ if __name__=="main_":
                     mode = 'creeper a la vista'  
 
                 # Chama a função direção_robo_pista, que seta a velocidade do robô com base nos substados
-                direcao_robo_pista()
+                direcao_robo_pista(velocidade_saida)
                 rospy.sleep(0.01)  
 
             # Creeper foi creeperIDed
