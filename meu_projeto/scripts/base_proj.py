@@ -44,31 +44,21 @@ z=0
 theta=0
 v=0.2
 w=0.2
-dist=0.3
+dist=0.15
 MobileNetResults=[]
 
-velocityParked = Twist(Vector3(0,0,0), Vector3(0,0,0))
-velocityTrackForward = Twist(Vector3(v,0,0), Vector3(0,0,0))
-velocityTrackRight = Twist(Vector3(v,0,0), Vector3(0,0,-w))
-velocityTrackLeft = Twist(Vector3(v,0,0), Vector3(0,0,w))
-velocityCreeperRight = Twist(Vector3(v/3,0,0), Vector3(0,0,-w/3))
-velocityCreeperLeft = Twist(Vector3(v/3,0,0), Vector3(0,0,w/3))
-velocityApproachCreeper = Twist(Vector3(0.05,0,0), Vector3(0,0,0))
-velocityTwistCounterClockwise = Twist(Vector3(0,0,0), Vector3(0,0,w)) # Anti-Horário
-velocityTwistClockwise = Twist(Vector3(0,0,0), Vector3(0,0,-w)) # Horário
+clawIsClosed=None
+clawIsOpen=None
+armIsRetracted=None
+armIsStretched=None
+armIsRaised=None
+ID=None
+og=None
+match=None
 
-clawIsClosed=0
-clawIsOpen=-1
-armIsRetracted = -1.5
-armIsStretched = 0
-armIsRaised = 1.5
-id=None
-og=0
-match=0
-
-# Máquina de Estado
-estado = None
-subestado = None
+# Máquina de mode
+mode = None
+state = None
 
 # Verificação se creeper já foi identificado
 identificado = False
@@ -85,8 +75,8 @@ def posicao_odometry(data):
     y = data.pose.pose.position.y
 
     quat = data.pose.pose.orientation
-    lista = [quat.x, quat.y, quat.z, quat.w]
-    angs_rad = transformations.euler_from_quaternion(lista)
+    pos = [quat.x, quat.y, quat.z, quat.w]
+    angs_rad = transformations.euler_from_quaternion(pos)
     angs_degree = np.degrees(angs_rad)
     theta = angs_rad[2]
 
@@ -111,53 +101,49 @@ def go_to(x2, y2, pub):
     rospy.sleep(sleep)
 
     
-def meia_volta():
-    global velocityTwistClockwise
-    global velocityTrackForward
-
+def meia_volta(pub):
     tempo1 = 0.75 /v
 
-    # w = dteta/dt
     angulo = math.pi
     tempo2 = angulo/w
 
-    velocidade_saida.publish(velocityTwistClockwise)
+    pub.publish(velocityTwistClockwise)
     rospy.sleep(tempo2)
 
-    velocidade_saida.publish(velocityTrackForward)
+    pub.publish(velocityTrackForward)
     rospy.sleep(tempo1)
 
 
 def direcao_robo_pista():
-    global subestado
+    global state
 
-    if subestado == 'frente':
+    if state == 'frente':
         velocidade_saida.publish(velocityTrackForward)
 
-    if subestado == 'esquerda':
+    if state == 'esquerda':
         velocidade_saida.publish(velocityTrackLeft)
 
-    if subestado == 'direita':
+    if state == 'direita':
         velocidade_saida.publish(velocityTrackRight)
 
-    if subestado == 'final da pista':
-        meia_volta()
+    if state == 'final da pista':
+        meia_volta(velocidade_saida)
 
 
 def controla_garra():
-    global estado
-    global subestado
+    global mode
+    global state
     global identificado
 
-    if subestado == 'levanta garra':
+    if state == 'levanta garra':
         # Depois de estar a uma distancia pre-estabelecida, o creeper levanta o braco e abre a garra
-        # Feito isso, o estado muda para aproxima do creeper
+        # Feito isso, o mode muda para aproxima do creeper
         braco_publisher.publish(armIsStretched)
         garra_publisher.publish(clawIsOpen)
         rospy.sleep(0.2)
-        subestado = 'aproxima do creeper'
+        state = 'aproxima do creeper'
 
-    elif subestado == 'aproxima do creeper':
+    elif state == 'aproxima do creeper':
         velocidade_saida.publish(velocityParked)
         rospy.sleep(0.2)
         tempo_aproxima = (dist - 0.225)/0.05
@@ -165,21 +151,21 @@ def controla_garra():
         rospy.sleep(tempo_aproxima)
         # Anda um distancia nao_bateu lentamente 
         #feito isso, muda pra agarra creeper
-        subestado = 'agarra creeper'
+        state = 'agarra creeper'
     
-    elif subestado == 'agarra creeper':
+    elif state == 'agarra creeper':
         garra_publisher.publish(clawIsClosed)
         rospy.sleep(0.1)
         braco_publisher.publish(armIsRaised)
         rospy.sleep(0.1)
-        # Fecha a garra, levanta o braco, muda subestado pra retorna pra pista
-        subestado ='retorna pista'        
+        # Fecha a garra, levanta o braco, muda state pra retorna pra pista
+        state ='retorna pista'        
         
-    elif subestado == 'retorna pista':
+    elif state == 'retorna pista':
         go_to(ponto[0], ponto[1], velocidade_saida)
         identificado = True
-        estado = 'procurando pista'
-        subestado = ""
+        mode = 'procurando pista'
+        state = ""
 
 def roda_todo_frame(img):
     global cv_image
@@ -200,20 +186,16 @@ def roda_todo_frame(img):
         print("Descartando por causa do delay do frame:", delay)
         return 
     try:
-        antes = time.clock()
         temp_image = bridge.compressed_imgmsg_to_cv2(img, "bgr8")
         img1 = temp_image.copy()
-
         centro, saida_net, MobileNetResults =  auxiliar.processa(temp_image)        
-
-        depois = time.clock()
         cv_image = saida_net.copy()
         avg, center, isTrack =  auxiliar.identifica_pista(temp_image, "blue")
         avgCreeper, cmCreeper, isCreeper =  creeper.isCreeper(temp_image, goal[0])
         
-        # Identificação do Id
-        id = aruco.idTag(img1)
-        og = id[0][0]
+        # Identificação do ID
+        ID = aruco.idTag(img1)
+        og = ID[0][0]
 
         cv2.imshow("cv_image", temp_image)
         cv2.imshow("img1", img1)
@@ -236,58 +218,77 @@ if __name__=="main_":
 
     goal=("blue", 23, "dog")
 
+    clawIsClosed=0
+    clawIsOpen=-1
+    armIsRetracted = -1.5
+    armIsStretched = 0
+    armIsRaised = 1.5
+    ID=None
+    og=0
+    match=0
+
+    velocityParked = Twist(Vector3(0,0,0), Vector3(0,0,0))
+    velocityTrackForward = Twist(Vector3(v,0,0), Vector3(0,0,0))
+    velocityTrackRight = Twist(Vector3(v,0,0), Vector3(0,0,-w))
+    velocityTrackLeft = Twist(Vector3(v,0,0), Vector3(0,0,w))
+    velocityCreeperRight = Twist(Vector3(v/3,0,0), Vector3(0,0,-w/3))
+    velocityCreeperLeft = Twist(Vector3(v/3,0,0), Vector3(0,0,w/3))
+    velocityApproachCreeper = Twist(Vector3(0.05,0,0), Vector3(0,0,0))
+    velocityTwistCounterClockwise = Twist(Vector3(0,0,0), Vector3(0,0,w))
+    velocityTwistClockwise = Twist(Vector3(0,0,0), Vector3(0,0,-w))
+
     try:
         rospy.sleep(2.0)
-        estado = 'procurando pista'
+        mode = 'procurando pista'
         while not rospy.is_shutdown():
-            if estado == 'procurando pista':
+            if mode == 'procurando pista':
                 # Se eu nao identifico creeper eu procuro contorno
                 if not isCreeper: 
                     while not isTrack:
                         velocidade_saida.publish(velocityTwistCounterClockwise)
                         rospy.sleep(0.01)
-                    # Se eu identificar o contorno mudo meu estado e passo a seguir a pista    
-                    estado = 'segue pista'
+                    # Se eu identificar o contorno mudo meu mode e passo a seguir a pista    
+                    mode = 'segue pista'
 
-                # Se eu acho o creeper mudo o estado
+                # Se eu acho o creeper mudo o mode
                 if isCreeper and identificado==False: 
-                    estado = 'creeper a la vista'
+                    mode = 'creeper a la vista'
 
-            if estado == 'segue pista':
+            if mode == 'segue pista':
 
-                #precisa colocar a centralizacao da pista e o atualizar o subestado de acordo
-                #precisa atualizar estado caso veja um creeper
-                #precisa atualizar estado caso nao veja mais a pista
+                #precisa colocar a centralizacao da pista e o atualizar o state de acordo
+                #precisa atualizar mode caso veja um creeper
+                #precisa atualizar mode caso nao veja mais a pista
                 try:
                     if not chegou:
                         print("Encontrei pista")
                         if (avg[0] > center[0]):
-                            subestado = 'direita'
+                            state = 'direita'
                         elif (avg[0] < center[0]):
-                            subestado = 'esquerda'
+                            state = 'esquerda'
                         else:
-                            subestado = 'frente'
+                            state = 'frente'
 
                     else: #quando ve o final da pista vira 180 e anda 0.8 pra frente
                         print("Encontrei algum obstáculo")
-                        subestado = 'final da pista'
+                        state = 'final da pista'
                 except:
                     pass
 
                 
-                # Mudança de estado
+                # Mudança de mode
                 if not isTrack:
-                    estado = 'procurando pista'
+                    mode = 'procurando pista'
 
                 if isCreeper and identificado==False:
-                    estado = 'creeper a la vista'  
+                    mode = 'creeper a la vista'  
 
                 # Chama a função direção_robo_pista, que seta a velocidade do robô com base nos substados
                 direcao_robo_pista()
                 rospy.sleep(0.01)  
 
             # Creeper foi identificado
-            if estado == 'creeper a la vista':
+            if mode == 'creeper a la vista':
 
                 if flag:
                     ponto = (x,y)
@@ -296,25 +297,25 @@ if __name__=="main_":
                     print('Hasta la vista babeeeeee! Ponto: ', ponto) 
 
                 if not chegou: 
-                    subestado = 'segue creeper'
+                    state = 'segue creeper'
                     print('rosa here I goooo')
         
                 else:
-                    # Se for verdadeiro (match id desejado com id identificado):
+                    # Se for verdadeiro (match ID desejado com ID identificado):
                     if match > 200:
-                        estado = 'pega creeper'
-                        subestado = 'levanta garra' #levanto a garra assim que mudo o estado
+                        mode = 'pega creeper'
+                        state = 'levanta garra' #levanto a garra assim que mudo o mode
                     
 
                     # Se for falso, volta para a pista:
                     else:
                         print("Entrei na go to")
                         go_to(ponto[0], ponto[1], velocidade_saida)
-                        estado = 'procurando pista'
+                        mode = 'procurando pista'
                         match = 0
 
                 
-                if subestado == 'segue creeper':
+                if state == 'segue creeper':
                     print("matchs:", match)
                     
                     if og == goal[1]:
@@ -329,7 +330,7 @@ if __name__=="main_":
 
 
                 # cheguei no creeper, pego ele
-            if estado == 'pega creeper':
+            if mode == 'pega creeper':
                 velocidade_saida.publish(velocityParked)
                 rospy.sleep(0.1)
 
@@ -340,8 +341,8 @@ if __name__=="main_":
                 
 
             print("#####################################")
-            print('estado: ', estado)
-            print('subestado: ', subestado)
+            print('mode: ', mode)
+            print('state: ', state)
 
     except rospy.ROSInterruptException:
         print("Ocorreu uma exceção com o rospy")
