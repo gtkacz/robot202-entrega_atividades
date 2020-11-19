@@ -8,10 +8,11 @@ import numpy as np
 import argparse
 import rospkg
 import os
+import cv2
 
 
 rospack = rospkg.RosPack()
-path = rospack.get_path('Projeto')
+path = rospack.get_path('meu_projeto')
 scripts = os.path.join(path,  "scripts")
 
 proto = os.path.join(scripts,"MobileNetSSD_deploy.prototxt.txt")

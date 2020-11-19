@@ -1,12 +1,14 @@
 #! /usr/bin/env python
 # -*- coding:utf-8 -*-
+
 from __future__ import print_function, division
-
-__author__ = ["Gabriel Mitelman Tkacz", "Rafael Selcali Malcervelli", "Enrico Venturini Costa"]
-
+import rospy
 import numpy as np
 import numpy
-import tf, math, cv2, time, rospy
+import tf
+import math
+import cv2
+import time
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import Image, CompressedImage, LaserScan
 from cv_bridge import CvBridge, CvBridgeError
@@ -15,276 +17,341 @@ from tf import transformations
 from tf import TransformerROS
 import tf2_ros
 from geometry_msgs.msg import Twist, Vector3, Pose, Vector3Stamped
+import rospkg
 from nav_msgs.msg import Odometry
 from std_msgs.msg import Header
 from std_msgs.msg import Float64
-import cv_bridge
 import auxiliar
 import aruco
-import pandas as pd
 
-bridge=CvBridge()
-cv_image=None
-avg=[]
-centro=[]
-atraso=1.5E9 # 1 segundo e meio. Em nanossegundos
-check_delay=False
-rospack=rospkg.RosPack() 
+bridge = CvBridge() 
+cv_image = None 
+rospack = rospkg.RosPack() 
+#Objetivo
+#         cor   id  estacao
+goal = ("rosa", 13, "bird")
+
+media_pista = []
+centro_pista = []
+identifica_contorno_pista = True
+identifica_creeper = False
+
+# Atrasos e delays - Descarta imagens que chegam atrasadas demais
+# Só usar se os relógios ROS da Raspberry e do Linux desktop estiverem sincronizados.  
+atraso = 1.5E9 # 1 segundo e meio. Em nanossegundos
+check_delay = False
+resultados = []
+x = 0
+y = 0
+z = 0 
+alpha = 0
+ids = None
+numero_comparado = 0
+match = 0
 tfl = 0
 tf_buffer = tf2_ros.Buffer()
+nao_bateu = True
+dist_preventiva = 0.3
 
-avg=[]
-center=[]
-isTrack=True
-isCreeper=False
-chegou=False
+# Inicializando velocidades - por default gira no sentido anti-horário
+w = 0.35
+v = 0.25
 
-x=0
-y=0
-z=0
-theta=0
-v=0.2
-w=0.2
-dist=0.15
-MobileNetResults=[]
+vel_direita = Twist(Vector3(v,0,0), Vector3(0,0,-w))
+vel_esquerda = Twist(Vector3(v,0,0), Vector3(0,0,w))
+vel_direita_creeper = Twist(Vector3(v/3,0,0), Vector3(0,0,-w/3))
+vel_esquerda_creeper = Twist(Vector3(v/3,0,0), Vector3(0,0,w/3))
 
-clawIsClosed=None
-clawIsOpen=None
-armIsRetracted=None
-armIsStretched=None
-armIsRaised=None
-ID=None
-og=None
-match=None
+vel_frente = Twist(Vector3(v,0,0), Vector3(0,0,0))
+vel_parado = Twist(Vector3(0,0,0), Vector3(0,0,0))
+vel_girando_ah = Twist(Vector3(0,0,0), Vector3(0,0,w)) # Anti-Horário
+vel_girando_h = Twist(Vector3(0,0,0), Vector3(0,0,-w)) # Horário
+vel_lenta = Twist(Vector3(0.05,0,0), Vector3(0,0,0))
 
-creeperIDed=False
-mode=False
-state=False
-flag=True
+# Inicializando posicoes da garra e braco
+braco_frente = 0
+braco_levantado = 1.5
+braco_recolhido = -1.5
 
-def posicao_odometry(data):
+garra_aberta = -1
+garra_fechada = 0
+
+
+# Máquina de Estado
+estado = None
+subestado = None
+
+# Verificação se creeper já foi identificado
+identificado = False
+
+# Marcação para guardar a posição anterior à identificação do creeper
+flag = True
+
+
+# FUNÇÕS A SEREM UTILIZADAS
+
+def scaneou(dado):
+    global nao_bateu
+    global dist_preventiva
+    
+    if dado.ranges[0] <= dist_preventiva:
+        nao_bateu = False
+    else:
+        nao_bateu = True
+
+
+def recebe_odometria(data):
     global x
     global y
-    global theta
+    global alpha
 
     x = data.pose.pose.position.x
     y = data.pose.pose.position.y
 
     quat = data.pose.pose.orientation
-    pos = [quat.x, quat.y, quat.z, quat.w]
-    angs_rad = transformations.euler_from_quaternion(pos)
-    angs_degree = np.degrees(angs_rad)
-    theta = angs_rad[2]
+    lista = [quat.x, quat.y, quat.z, quat.w]
+    angulos_rad = transformations.euler_from_quaternion(lista)
 
-def scaneou(img):
-    global chegou
-    global dist
-    if img.ranges[0] <= dist:
-        chegou=True
-    else:
-        chegou=False
+    alpha = angulos_rad[2] # mais facil se guardarmos alpha em radianos
     
+
 def go_to(x2, y2, pub):
-    delta=math.atan2(y2-y, x2-x)
-    ang=delta-theta
+    # Odometria
+    global alpha 
+    global x
+    global y
 
-    sleep=ang/w
-    pub.publish(velocityTwistCounterClockwise)
-    rospy.sleep(sleep)
+    # Velocidades 
+    global v
+    global w
+    global vel_girando_ah
+    global vel_frente
+    
+    # calcular theta
+    theta = math.atan2(y2-y, x2-x)
 
-    sleep=0.75/v
-    pub.publish(velocityTrackForward)
-    rospy.sleep(sleep)
+    # ângulo que o robô deve virar para se ajustar com o ponto
+    angulo = theta - alpha
+
+    # girar theta - alpha para a esquerda
+    tempo = angulo / w
+
+
+    # corrigir o ângulo
+    pub.publish(vel_girando_ah)
+    rospy.sleep(tempo)
+
+    # andar 0.8 metros
+    tempo2 = 0.8 / v
+    pub.publish(vel_frente)
+    rospy.sleep(tempo2)
 
     
-def halfTurn(pub):
-    ang=math.pi
+def meia_volta():
+    global vel_girando_h
+    global vel_frente
 
-    sleepLinear=(0.75/v)
-    sleepAngular=(ang/w)
+    tempo1 = 0.8 /v
 
-    pub.publish(velocityTwistClockwise)
-    rospy.sleep(sleepAngular)
+    # w = dteta/dt
+    angulo = math.pi
+    tempo2 = angulo/w
 
-    pub.publish(velocityTrackForward)
-    rospy.sleep(sleepLinear)
+    velocidade_saida.publish(vel_girando_h)
+    rospy.sleep(tempo2)
+
+    velocidade_saida.publish(vel_frente)
+    rospy.sleep(tempo1)
 
 
-def direcao_robo_pista(pub):
-    global state
+def direcao_robo_pista():
+    global subestado
 
-    if state == 'forward':
-        pub.publish(velocityTrackForward)
+    if subestado == 'frente':
+        velocidade_saida.publish(vel_frente)
 
-    if state == 'left':
-        pub.publish(velocityTrackLeft)
+    if subestado == 'esquerda':
+        velocidade_saida.publish(vel_esquerda)
 
-    if state == 'right':
-        pub.publish(velocityTrackRight)
+    if subestado == 'direita':
+        velocidade_saida.publish(vel_direita)
 
-    if state == 'end':
-        halfTurn(pub)
+    if subestado == 'final da pista':
+        meia_volta()
 
 
 def controla_garra():
-    global mode
-    global state
-    global creeperIDed
+    global estado
+    global subestado
+    global identificado
 
-    if state == 'levanta garra':
+    if subestado == 'levanta garra':
         # Depois de estar a uma distancia pre-estabelecida, o creeper levanta o braco e abre a garra
-        # Feito isso, o mode muda para aproxima do creeper
-        braco_publisher.publish(armIsStretched)
-        garra_publisher.publish(clawIsOpen)
+        # Feito isso, o estado muda para aproxima do creeper
+        braco_publisher.publish(braco_frente)
+        garra_publisher.publish(garra_aberta)
         rospy.sleep(0.2)
-        state = 'aproxima do creeper'
+        subestado = 'aproxima do creeper'
 
-    elif state == 'aproxima do creeper':
-        velocidade_saida.publish(velocityParked)
+    elif subestado == 'aproxima do creeper':
+        velocidade_saida.publish(vel_parado)
         rospy.sleep(0.2)
-        tempo_aproxima = (dist - 0.225)/0.05
-        velocidade_saida.publish(velocityApproachCreeper)
+        tempo_aproxima = (dist_preventiva - 0.225)/0.05
+        velocidade_saida.publish(vel_lenta)
         rospy.sleep(tempo_aproxima)
         # Anda um distancia nao_bateu lentamente 
         #feito isso, muda pra agarra creeper
-        state = 'agarra creeper'
+        subestado = 'agarra creeper'
     
-    elif state == 'agarra creeper':
-        garra_publisher.publish(clawIsClosed)
+    elif subestado == 'agarra creeper':
+        garra_publisher.publish(garra_fechada)
         rospy.sleep(0.1)
-        braco_publisher.publish(armIsRaised)
+        braco_publisher.publish(braco_levantado)
         rospy.sleep(0.1)
-        # Fecha a garra, levanta o braco, muda state pra retorna pra pista
-        state ='retorna pista'        
+        # Fecha a garra, levanta o braco, muda subestado pra retorna pra pista
+        subestado ='retorna pista'        
         
-    elif state == 'retorna pista':
+    elif subestado == 'retorna pista':
         go_to(ponto[0], ponto[1], velocidade_saida)
-        creeperIDed = True
-        mode = 'procurando pista'
-        state = ""
+        identificado = True
+        estado = 'procurando pista'
+        subestado = ""
+    
 
-def roda_todo_frame(img):
+
+# A função a seguir é chamada sempre que chega um novo frame
+def roda_todo_frame(imagem):
     global cv_image
-    global avg
-    global center
-    global MobileNetResults
-    global isTrack
-    global avgCreeper
-    global cmCreeper
-    global isCreeper
-    global og
+    global media_pista
+    global centro_pista
+    global resultados
+    global identifica_contorno_pista
 
+    global media_creeper
+    global centro_creeper
+    global identifica_creeper
+
+    global numero_comparado
+
+    # Para robô real
     now = rospy.get_rostime()
-    imgtime = img.header.stamp
+    imgtime = imagem.header.stamp
     lag = now-imgtime # calcula o lag
     delay = lag.nsecs
+
     if delay > atraso and check_delay==True:
         print("Descartando por causa do delay do frame:", delay)
         return 
     try:
-        temp_image = bridge.compressed_imgmsg_to_cv2(img, "bgr8")
-        img1 = temp_image.copy()
-        centro, saida_net, MobileNetResults =  auxiliar.processa(temp_image)        
+        antes = time.clock()
+        temp_image = bridge.compressed_imgmsg_to_cv2(imagem, "bgr8")
+        aruco_image = temp_image.copy()
+
+        # Note que os resultados já são guardados automaticamente na variável chamada resultados
+        centro, saida_net, resultados =  auxiliar.processa(temp_image)        
+        for r in resultados:
+            # print(r) - print dos resultados da mobilebnet
+            pass
+
+        depois = time.clock()
+        # Desnecessário - Hough e MobileNet já abrem janelas
+
         cv_image = saida_net.copy()
-        avg, center, isTrack =  auxiliar.identifica_pista(temp_image, "blue")
-        avgCreeper, cmCreeper, isCreeper =  creeper.isCreeper(temp_image, goal[0])
+        # cv_image = cv2.flip(cv_image, -1) # Descomente se for robo real
+        media_pista, centro_pista, identifica_contorno_pista =  auxiliar.identifica_pista(temp_image)
+        media_creeper, centro_creeper, identifica_creeper =  auxiliar.identifica_creeper(temp_image, goal[0])
         
-        # Identificação do ID
-        ID = aruco.idTag(img1)
-        og = ID[0][0]
+        # Identificação do Id
+        ids = aruco.identifica_id(aruco_image)
+        numero_comparado = ids[0][0]
 
         cv2.imshow("cv_image", temp_image)
-        cv2.imshow("img1", img1)
+        cv2.imshow("aruco_image", aruco_image)
         cv2.waitKey(1)
 
     except CvBridgeError as e:
         print('ex', e)
+    path = rospack.get_path('meu_projeto')
 
 
-if __name__=="main_":
-    rospy.init_node("Projeto") 
-    topico_img="/camera/image/compressed"
-    odom_sub = rospy.Subscriber("/odom", Odometry, posicao_odometry)
-    recebe_img=rospy.Subscriber(topico_img, CompressedImage, roda_todo_frame, queue_size=4, buff_size = 2**24)
-    scanner = rospy.Subscriber("/scan", LaserScan, scaneou)
+if __name__=="__main__":
+    rospy.init_node("main") 
+
+    topico_imagem = "/camera/image/compressed"
+    # topico_imagem = "/raspicam/image_raw/compressed" # Use para robo real
+
+    recebedor = rospy.Subscriber(topico_imagem, CompressedImage, roda_todo_frame, queue_size=4, buff_size = 2**24)
+
+    print("Usando ", topico_imagem)
+
     velocidade_saida = rospy.Publisher("/cmd_vel", Twist, queue_size = 1)
-    tfl = tf2_ros.TransformListener(tf_buffer)
+    ref_odometria = rospy.Subscriber("/odom", Odometry, recebe_odometria)
+    recebe_scan = rospy.Subscriber("/scan", LaserScan, scaneou)
     braco_publisher = rospy.Publisher('/joint1_position_controller/command', Float64, queue_size=1)
     garra_publisher = rospy.Publisher('/joint2_position_controller/command', Float64, queue_size=1)
 
-    goal=("blue", 23, "dog")
 
-    clawIsClosed=0
-    clawIsOpen=-1
-    armIsRetracted = -1.5
-    armIsStretched = 0
-    armIsRaised = 1.5
-    ID=None
-    og=0
-    match=0
+    tfl = tf2_ros.TransformListener(tf_buffer) #conversao do sistema de coordenadas 
+    
+    # Exemplo de categoria de resultados
+    # [('chair', 86.965459585189819, (90, 141), (177, 265))]
 
-    velocityParked = Twist(Vector3(0,0,0), Vector3(0,0,0))
-    velocityTrackForward = Twist(Vector3(v,0,0), Vector3(0,0,0))
-    velocityTrackRight = Twist(Vector3(v,0,0), Vector3(0,0,-w))
-    velocityTrackLeft = Twist(Vector3(v,0,0), Vector3(0,0,w))
-    velocityCreeperRight = Twist(Vector3(v/3,0,0), Vector3(0,0,-w/3))
-    velocityCreeperLeft = Twist(Vector3(v/3,0,0), Vector3(0,0,w/3))
-    velocityApproachCreeper = Twist(Vector3(0.05,0,0), Vector3(0,0,0))
-    velocityTwistCounterClockwise = Twist(Vector3(0,0,0), Vector3(0,0,w))
-    velocityTwistClockwise = Twist(Vector3(0,0,0), Vector3(0,0,-w))
 
     try:
-        rospy.sleep(2.0)
-        mode = 'procurando pista'
+        estado = 'procurando pista'
+
         while not rospy.is_shutdown():
-            if mode == 'procurando pista':
+            # for r in resultados:
+            #    print(r)
+
+            if estado == 'procurando pista':
                 # Se eu nao identifico creeper eu procuro contorno
-                if not isCreeper: 
-                    while not isTrack:
-                        velocidade_saida.publish(velocityTwistCounterClockwise)
+                if not identifica_creeper: 
+                    while not identifica_contorno_pista:
+                        velocidade_saida.publish(vel_girando_ah)
                         rospy.sleep(0.01)
-                    # Se eu identificar o contorno mudo meu mode e passo a seguir a pista    
-                    mode = 'segue pista'
+                    # Se eu identificar o contorno mudo meu estado e passo a seguir a pista    
+                    estado = 'segue pista'
 
-                # Se eu acho o creeper mudo o mode
-                if isCreeper and creeperIDed==False: 
-                    mode = 'creeper a la vista'
+                # Se eu acho o creeper mudo o estado
+                if identifica_creeper and identificado==False: 
+                    estado = 'creeper a la vista'
 
-            if mode == 'segue pista':
+            if estado == 'segue pista':
 
-                #precisa colocar a centralizacao da pista e o atualizar o state de acordo
-                #precisa atualizar mode caso veja um creeper
-                #precisa atualizar mode caso nao veja mais a pista
+                #precisa colocar a centralizacao da pista e o atualizar o subestado de acordo
+                #precisa atualizar estado caso veja um creeper
+                #precisa atualizar estado caso nao veja mais a pista
                 try:
-                    if not chegou:
+                    if nao_bateu:
                         print("Encontrei pista")
-                        if (avg[0] > center[0]):
-                            state = 'right'
-                        elif (avg[0] < center[0]):
-                            state = 'left'
+                        if (media_pista[0] > centro_pista[0]):
+                            subestado = 'direita'
+                        elif (media_pista[0] < centro_pista[0]):
+                            subestado = 'esquerda'
                         else:
-                            state = 'forward'
+                            subestado = 'frente'
 
                     else: #quando ve o final da pista vira 180 e anda 0.8 pra frente
                         print("Encontrei algum obstáculo")
-                        state = 'end'
+                        subestado = 'final da pista'
                 except:
                     pass
 
                 
-                # Mudança de mode
-                if not isTrack:
-                    mode = 'procurando pista'
+                # Mudança de estado
+                if not identifica_contorno_pista:
+                    estado = 'procurando pista'
 
-                if isCreeper and creeperIDed==False:
-                    mode = 'creeper a la vista'  
+                if identifica_creeper and identificado==False:
+                    estado = 'creeper a la vista'  
 
                 # Chama a função direção_robo_pista, que seta a velocidade do robô com base nos substados
-                direcao_robo_pista(velocidade_saida)
+                direcao_robo_pista()
                 rospy.sleep(0.01)  
 
-            # Creeper foi creeperIDed
-            if mode == 'creeper a la vista':
+            # Creeper foi identificado
+            if estado == 'creeper a la vista':
 
                 if flag:
                     ponto = (x,y)
@@ -292,42 +359,42 @@ if __name__=="main_":
                     flag = False
                     print('Hasta la vista babeeeeee! Ponto: ', ponto) 
 
-                if not chegou: 
-                    state = 'segue creeper'
+                if nao_bateu: 
+                    subestado = 'segue creeper'
                     print('rosa here I goooo')
         
                 else:
-                    # Se for verdadeiro (match ID desejado com ID creeperIDed):
+                    # Se for verdadeiro (match id desejado com id identificado):
                     if match > 200:
-                        mode = 'pega creeper'
-                        state = 'levanta garra' #levanto a garra assim que mudo o mode
+                        estado = 'pega creeper'
+                        subestado = 'levanta garra' #levanto a garra assim que mudo o estado
                     
 
                     # Se for falso, volta para a pista:
                     else:
                         print("Entrei na go to")
                         go_to(ponto[0], ponto[1], velocidade_saida)
-                        mode = 'procurando pista'
+                        estado = 'procurando pista'
                         match = 0
 
                 
-                if state == 'segue creeper':
+                if subestado == 'segue creeper':
                     print("matchs:", match)
                     
-                    if og == goal[1]:
+                    if numero_comparado == goal[1]:
                         match += 1
 
-                    if (avgCreeper[0] > cmCreeper[0]):
-                        velocidade_saida.publish(velocityCreeperRight)
-                    elif (avgCreeper[0] < cmCreeper[0]):
-                        velocidade_saida.publish(velocityCreeperLeft)
+                    if (media_creeper[0] > centro_creeper[0]):
+                        velocidade_saida.publish(vel_direita_creeper)
+                    elif (media_creeper[0] < centro_creeper[0]):
+                        velocidade_saida.publish(vel_esquerda_creeper)
 
                     rospy.sleep(0.01)
 
 
                 # cheguei no creeper, pego ele
-            if mode == 'pega creeper':
-                velocidade_saida.publish(velocityParked)
+            if estado == 'pega creeper':
+                velocidade_saida.publish(vel_parado)
                 rospy.sleep(0.1)
 
                 # Chama a função para controlar a garra, baseado nos subestados
@@ -337,8 +404,8 @@ if __name__=="main_":
                 
 
             print("#####################################")
-            print('mode: ', mode)
-            print('state: ', state)
+            print('estado: ', estado)
+            print('subestado: ', subestado)
 
     except rospy.ROSInterruptException:
         print("Ocorreu uma exceção com o rospy")

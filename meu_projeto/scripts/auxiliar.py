@@ -14,7 +14,7 @@ from geometry_msgs.msg import Twist, Vector3, Pose
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import Image, CompressedImage
 from cv_bridge import CvBridge, CvBridgeError
-import mobilenet
+from mobilenet import detect
 
 def make_widgets_mat(m, n):
     """
@@ -99,49 +99,46 @@ def colorNameToValue(color):
     elif color == 'pink':
         return '#'
 
-def processa(frame):
-    result_frame, result_tuples = mobilenet.detect(frame)
-    centro = (frame.shape[1]//2, frame.shape[0]//2)
+def identifica_creeper(frame, creeper_color):
+    maior_contorno = 0
+    maior_contorno_area = 0
 
-    def cross(img_rgb, point, color, width,length):
-        cv2.line(img_rgb, (point[0] - int(length/2), point[1]),  (point[0] + int(length/2), point[1]), color ,width, length)
-        cv2.line(img_rgb, (point[0], point[1] - int(length/2)), (point[0], point[1] + int(length/2)),color ,width, length)
-
-    cross(result_frame, centro, [255,0,0], 1, 17)
-    return centro, result_frame, result_tuples
-
-def identifica_cor(frame):
+    segmentado_cor = None
     frame_hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
-    cor_menor = np.array([0, 50, 50])
-    cor_maior = np.array([8, 255, 255])
-    segmentado_cor = cv2.inRange(frame_hsv, cor_menor, cor_maior)
+    # segmentação para trabalhar com as cores dos creepers da pista 
+    if creeper_color == "rosa":
+        cor_menor, cor_maior = ranges("#e60c69")
+        segmentado_cor = cv2.inRange(frame_hsv, cor_menor, cor_maior)
+    
+    elif creeper_color == "azul":
+        cor_menor, cor_maior = ranges("#0000ff")
+        segmentado_cor = cv2.inRange(frame_hsv, cor_menor, cor_maior)
 
-    cor_menor = np.array([172, 50, 50])
-    cor_maior = np.array([180, 255, 255])
-    segmentado_cor += cv2.inRange(frame_hsv, cor_menor, cor_maior)
+    elif creeper_color == "vermelho":
+        cor_menor = np.array([0, 180, 135])
+        cor_maior = np.array([2, 255, 255])
+        segmentado_cor = cv2.inRange(frame_hsv, cor_menor, cor_maior)
+
+        cor_menor = np.array([178, 180, 135])
+        cor_maior = np.array([180, 255, 255])
+        segmentado_cor += cv2.inRange(frame_hsv, cor_menor, cor_maior)
 
 
+    # Note que a notacão do numpy encara as imagens como matriz, portanto o enderecamento é
+    # linha, coluna ou (y,x)
+    # Por isso na hora de montar a tupla com o centro precisamos inverter, porque 
     centro = (frame.shape[1]//2, frame.shape[0]//2)
 
 
     def cross(img_rgb, point, color, width,length):
         cv2.line(img_rgb, (point[0] - length/2, point[1]),  (point[0] + length/2, point[1]), color ,width, length)
-        cv2.line(img_rgb, (point[0], point[1] - length/2), (point[0], point[1] + length/2),color ,width, length)
+        cv2.line(img_rgb, (point[0], point[1] - length/2), (point[0], point[1] + length/2),color ,width, length) 
 
-
-
-    # A operação MORPH_CLOSE fecha todos os buracos na máscara menores
-    # que um quadrado 7x7. É muito útil para juntar vários
-    # pequenos contornos muito próximos em um só.
-    segmentado_cor = cv2.morphologyEx(segmentado_cor,cv2.MORPH_CLOSE,np.ones((7, 7)))
 
     # Encontramos os contornos na máscara e selecionamos o de maior área
-    #contornos, arvore = cv2.findContours(segmentado_cor.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-    img_out, contornos, arvore = cv2.findContours(segmentado_cor.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    contornos, arvore = cv2.findContours(segmentado_cor.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE) 
 
-    maior_contorno = None
-    maior_contorno_area = 0
 
     for cnt in contornos:
         area = cv2.contourArea(cnt)
@@ -149,27 +146,36 @@ def identifica_cor(frame):
             maior_contorno = cnt
             maior_contorno_area = area
 
-    # Encontramos o centro do contorno fazendo a média de todos seus pontos.
-    if not maior_contorno is None :
-        cv2.drawContours(frame, [maior_contorno], -1, [0, 0, 255], 5)
-        maior_contorno = np.reshape(maior_contorno, (maior_contorno.shape[0], 2))
-        media = maior_contorno.mean(axis=0)
-        media = media.astype(np.int32)
-        cv2.circle(frame, (media[0], media[1]), 5, [0, 255, 0])
-        cross(frame, centro, [255,0,0], 1, 17)
-    else:
-        media = (0, 0)
+    def booleanContornos(maior_contorno):
+        if maior_contorno_area > 100:
+            return True
+        else:
+            return False
 
-    # Representa a area e o centro do maior contorno no frame
-    font = cv2.FONT_HERSHEY_COMPLEX_SMALL
-    cv2.putText(frame,"{:d} {:d}".format(*media),(20,100), 1, 4,(255,255,255),2,cv2.LINE_AA)
-    cv2.putText(frame,"{:0.1f}".format(maior_contorno_area),(20,50), 1, 4,(255,255,255),2,cv2.LINE_AA)
+    media = None
+    
+    try:
+        if not maior_contorno is None :
+            cv2.drawContours(frame, maior_contorno, -1, (0, 255, 0), 5)
+            maior_contorno = np.reshape(maior_contorno, (maior_contorno.shape[0], 2))
+            # centro do maior contorno
+            media = maior_contorno.mean(axis=0)
+            media = media.astype(np.int32)
+            cv2.circle(frame, (media[0], media[1]), 5, [0, 255, 0])
+            cross(frame, centro, [0, 255,0], 1, 17)
+        else:
+            media = (0, 0)
+    except:
+        pass
 
-    return centro, result_frame, result_tuples
+    cv2.imshow('seg', segmentado_cor)
+    cv2.waitKey(1)
 
-def identifica_pista(bgr, color):
+    return media, centro, booleanContornos(maior_contorno)
+
+def identifica_pista(bgr):
     centro = (bgr.shape[1]//2, bgr.shape[0]//2)
-    low, high = ranges(color)
+
     # Valores para amarelo usando um color picker
     # mascara amarela
     low = np.array([22, 50, 50],dtype=np.uint8)
@@ -214,75 +220,118 @@ def identifica_pista(bgr, color):
     return media, centro, booleanContornos(maior_contorno)
 
 def center_of_mass(mask):
+    """ Retorna uma tupla (cx, cy) que desenha o centro do contorno"""
     M = cv2.moments(mask)
+
+    # Usando a expressão do centróide definida em: https://en.wikipedia.org/wiki/Image_moment
     cX = int(M["m10"] / M["m00"])
     cY = int(M["m01"] / M["m00"])
-
     return [int(cX), int(cY)]
 
+
+
 def crosshair(img, point, size, color):
+    """ Desenha um crosshair centrado no point.
+        point deve ser uma tupla (x,y)
+        color é uma tupla R,G,B uint8
+    """
     x,y = point
     cv2.line(img,(x - size,y),(x + size,y),color,5)
     cv2.line(img,(x,y - size),(x, y + size),color,5)
 
+
 def center_of_mass_region(mask, x1, y1, x2, y2):
+    # Para fins de desenho
     mask_bgr = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
     clipped = mask[y1:y2, x1:x2]
     c = center_of_mass(clipped)
     c[0]+=x1
     c[1]+=y1
     crosshair(mask_bgr, c, 10, (0,0,255))
-
     return mask_bgr
 
-maior_contorno = 0
-maior_contorno_area = 0
+def processa(frame):
+    '''Use esta funcao para basear o processamento do seu robo'''
 
-def identifica_creeper(frame, creeper_color):
-    global maior_contorno
-    global maior_contorno_area
-
-    segmentado_cor = None
-    frame_hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-    if creeper_color == "blue":
-        cor_menor, cor_maior = aux.ranges("#0000ff")
-        segmentado_cor = cv2.inRange(frame_hsv, cor_menor, cor_maior)
-
-    elif creeper_color == "pink":
-        cor_menor, cor_maior = aux.ranges("#e60c69")
-        segmentado_cor = cv2.inRange(frame_hsv, cor_menor, cor_maior)
+    result_frame, result_tuples = detect(frame)
 
     centro = (frame.shape[1]//2, frame.shape[0]//2)
 
+
+    def cross(img_rgb, point, color, width,length):
+        cv2.line(img_rgb, (point[0] - int(length/2), point[1]),  (point[0] + int(length/2), point[1]), color ,width, length)
+        cv2.line(img_rgb, (point[0], point[1] - int(length/2)), (point[0], point[1] + int(length/2)),color ,width, length)
+
+    cross(result_frame, centro, [255,0,0], 1, 17)
+
+
+    return centro, result_frame, result_tuples
+
+
+
+def identifica_cor(frame):
+    '''
+    Segmenta o maior objeto cuja cor é parecida com cor_h (HUE da cor, no espaço HSV).
+    '''
+
+    # No OpenCV, o canal H vai de 0 até 179, logo cores similares ao
+    # vermelho puro (H=0) estão entre H=-8 e H=8.
+    # Precisamos dividir o inRange em duas partes para fazer a detecção
+    # do vermelho:
+    frame_hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+
+    cor_menor = np.array([0, 50, 50])
+    cor_maior = np.array([8, 255, 255])
+    segmentado_cor = cv2.inRange(frame_hsv, cor_menor, cor_maior)
+
+    cor_menor = np.array([172, 50, 50])
+    cor_maior = np.array([180, 255, 255])
+    segmentado_cor += cv2.inRange(frame_hsv, cor_menor, cor_maior)
+
+    # Note que a notacão do numpy encara as imagens como matriz, portanto o enderecamento é
+    # linha, coluna ou (y,x)
+    # Por isso na hora de montar a tupla com o centro precisamos inverter, porque
+    centro = (frame.shape[1]//2, frame.shape[0]//2)
+
+
     def cross(img_rgb, point, color, width,length):
         cv2.line(img_rgb, (point[0] - length/2, point[1]),  (point[0] + length/2, point[1]), color ,width, length)
-        cv2.line(img_rgb, (point[0], point[1] - length/2), (point[0], point[1] + length/2),color ,width, length) 
+        cv2.line(img_rgb, (point[0], point[1] - length/2), (point[0], point[1] + length/2),color ,width, length)
 
-    contornos, arvore = cv2.findContours(segmentado_cor.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE) 
+
+
+    # A operação MORPH_CLOSE fecha todos os buracos na máscara menores
+    # que um quadrado 7x7. É muito útil para juntar vários
+    # pequenos contornos muito próximos em um só.
+    segmentado_cor = cv2.morphologyEx(segmentado_cor,cv2.MORPH_CLOSE,np.ones((7, 7)))
+
+    # Encontramos os contornos na máscara e selecionamos o de maior área
+    #contornos, arvore = cv2.findContours(segmentado_cor.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    img_out, contornos, arvore = cv2.findContours(segmentado_cor.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+
+    maior_contorno = None
+    maior_contorno_area = 0
+
     for cnt in contornos:
         area = cv2.contourArea(cnt)
         if area > maior_contorno_area:
             maior_contorno = cnt
             maior_contorno_area = area
 
-    def booleanContornos(maior_contorno):
-        if maior_contorno_area > 100:
-            return True
-        else:
-            return False
-
-    media = None
+    # Encontramos o centro do contorno fazendo a média de todos seus pontos.
     if not maior_contorno is None :
-        cv2.drawContours(frame, [maior_contorno], -1, [0, 255, 0], 5)
+        cv2.drawContours(frame, [maior_contorno], -1, [0, 0, 255], 5)
         maior_contorno = np.reshape(maior_contorno, (maior_contorno.shape[0], 2))
         media = maior_contorno.mean(axis=0)
         media = media.astype(np.int32)
         cv2.circle(frame, (media[0], media[1]), 5, [0, 255, 0])
-        cross(frame, centro, [0, 255,0], 1, 17)
+        cross(frame, centro, [255,0,0], 1, 17)
     else:
         media = (0, 0)
 
-    cv2.imshow('seg', segmentado_cor)
-    cv2.waitKey(1)
+    # Representa a area e o centro do maior contorno no frame
+    font = cv2.FONT_HERSHEY_COMPLEX_SMALL
+    cv2.putText(frame,"{:d} {:d}".format(*media),(20,100), 1, 4,(255,255,255),2,cv2.LINE_AA)
+    cv2.putText(frame,"{:0.1f}".format(maior_contorno_area),(20,50), 1, 4,(255,255,255),2,cv2.LINE_AA)
 
-    return media, centro, booleanContornos(maior_contorno)
+    return centro, result_frame, result_tuples
