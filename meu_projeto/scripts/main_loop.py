@@ -9,8 +9,7 @@ from cv_bridge         import CvBridge, CvBridgeError
 from geometry_msgs.msg import Twist, Vector3, Pose, Vector3Stamped
 from tf import transformations
 from tf import TransformerROS
-from auxiliar import encontra_cm, controla_direcao, muda_velocidade, rotacionar_procurar_creeper
-from auxiliar import distacia_ate_creeper, garra
+from auxiliar import encontra_cm, controla_direcao, muda_velocidade, rotacionar_procurar_creeper, distacia_ate_creeper, garra
 
 def ajustar_posicao_inicial(cor_creeper_objetivo, maquina_estados):
     if cor_creeper_objetivo == "blue":
