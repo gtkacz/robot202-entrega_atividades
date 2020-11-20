@@ -236,7 +236,7 @@ def distacia_ate_creeper(img_bgr, id_creeper_procurado):
         for tag in ids:
             print("distancia creeper: ")
             print(menor_distancia, "\n")
-            if tag[0] == id_creeper_procurado and menor_distancia <= 210:
+            if tag[0] == id_creeper_procurado and menor_distancia <= 213:
                 return True
     else: 
         return False
