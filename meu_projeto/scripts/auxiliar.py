@@ -5,16 +5,10 @@ print("Este script não deve ser executado diretamente")
 
 from ipywidgets import widgets, interact, interactive, FloatSlider, IntSlider
 import numpy as np
-import cv2
-import rospy
-import tf
-import math
-import time
-from geometry_msgs.msg import Twist, Vector3, Pose
-from nav_msgs.msg import Odometry
-from sensor_msgs.msg import Image, CompressedImage
-from cv_bridge import CvBridge, CvBridgeError
-from mobilenet import detect
+import cv2, masks, rospy, time
+import cv2.aruco as aruco 
+from geometry_msgs.msg import Twist, Vector3
+from std_msgs.msg import Float64
 
 def make_widgets_mat(m, n):
     """
@@ -99,136 +93,18 @@ def colorNameToValue(color):
     elif color == 'pink':
         return '#'
 
-def identifica_creeper(frame, creeper_color):
-    maior_contorno = 0
-    maior_contorno_area = 0
+def seleciona_cor(bgr, low, high):
+    cor_hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
+    mask = cv2.inRange(cor_hsv, low, high)
+    kernel = np.ones((6,6),np.uint8)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+    return mask  
 
-    segmentado_cor = None
-    frame_hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-
-    # segmentação para trabalhar com as cores dos creepers da pista 
-    if creeper_color == "rosa":
-        cor_menor, cor_maior = ranges("#e60c69")
-        segmentado_cor = cv2.inRange(frame_hsv, cor_menor, cor_maior)
-    
-    elif creeper_color == "azul":
-        cor_menor, cor_maior = ranges("#0000ff")
-        segmentado_cor = cv2.inRange(frame_hsv, cor_menor, cor_maior)
-
-    elif creeper_color == "vermelho":
-        cor_menor = np.array([0, 180, 135])
-        cor_maior = np.array([2, 255, 255])
-        segmentado_cor = cv2.inRange(frame_hsv, cor_menor, cor_maior)
-
-        cor_menor = np.array([178, 180, 135])
-        cor_maior = np.array([180, 255, 255])
-        segmentado_cor += cv2.inRange(frame_hsv, cor_menor, cor_maior)
-
-
-    # Note que a notacão do numpy encara as imagens como matriz, portanto o enderecamento é
-    # linha, coluna ou (y,x)
-    # Por isso na hora de montar a tupla com o centro precisamos inverter, porque 
-    centro = (frame.shape[1]//2, frame.shape[0]//2)
-
-
-    def cross(img_rgb, point, color, width,length):
-        cv2.line(img_rgb, (point[0] - length/2, point[1]),  (point[0] + length/2, point[1]), color ,width, length)
-        cv2.line(img_rgb, (point[0], point[1] - length/2), (point[0], point[1] + length/2),color ,width, length) 
-
-
-    # Encontramos os contornos na máscara e selecionamos o de maior área
-    contornos, arvore = cv2.findContours(segmentado_cor.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE) 
-
-
-    for cnt in contornos:
-        area = cv2.contourArea(cnt)
-        if area > maior_contorno_area:
-            maior_contorno = cnt
-            maior_contorno_area = area
-
-    def booleanContornos(maior_contorno):
-        if maior_contorno_area > 100:
-            return True
-        else:
-            return False
-
-    media = None
-    
-    try:
-        if not maior_contorno is None :
-            cv2.drawContours(frame, maior_contorno, -1, (0, 255, 0), 5)
-            maior_contorno = np.reshape(maior_contorno, (maior_contorno.shape[0], 2))
-            # centro do maior contorno
-            media = maior_contorno.mean(axis=0)
-            media = media.astype(np.int32)
-            cv2.circle(frame, (media[0], media[1]), 5, [0, 255, 0])
-            cross(frame, centro, [0, 255,0], 1, 17)
-        else:
-            media = (0, 0)
-    except:
-        pass
-
-    cv2.imshow('seg', segmentado_cor)
-    cv2.waitKey(1)
-
-    return media, centro, booleanContornos(maior_contorno)
-
-def identifica_pista(bgr):
-    centro = (bgr.shape[1]//2, bgr.shape[0]//2)
-
-    # Valores para amarelo usando um color picker
-    # mascara amarela
-    low = np.array([22, 50, 50],dtype=np.uint8)
-    high = np.array([36, 255, 255],dtype=np.uint8)
-    hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
-    mask = cv2.inRange(hsv, low, high)
-    
-
-    # Encontramos os contornos na máscara e selecionamos o de maior área
-    contornos, arvore = cv2.findContours(mask.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE) 
-    
-
-    maior_contorno = None
-    maior_contorno_area = 0
-
-    for cnt in contornos:
-        area = cv2.contourArea(cnt)
-        if area > maior_contorno_area:
-            maior_contorno = cnt
-            maior_contorno_area = area
-
-    media = None
-    if not maior_contorno is None:
-        try:
-            p = center_of_mass(maior_contorno) # centro de massa
-            crosshair(bgr, p, 20, (128,128,0))
-            maior_contorno = np.reshape(maior_contorno, (maior_contorno.shape[0], 2))
-            media = maior_contorno.mean(axis=0)
-            media = media.astype(np.int32)
-        
-        except:
-            p = centro
-            crosshair(bgr, p, 20, (128,128,0))
-
-    def booleanContornos(maior_contorno):
-        if maior_contorno_area > 100:
-            return True
-        else:
-            return False
-
-    
-    return media, centro, booleanContornos(maior_contorno)
-
-def center_of_mass(mask):
-    """ Retorna uma tupla (cx, cy) que desenha o centro do contorno"""
+def cm(mask):
     M = cv2.moments(mask)
-
-    # Usando a expressão do centróide definida em: https://en.wikipedia.org/wiki/Image_moment
     cX = int(M["m10"] / M["m00"])
     cY = int(M["m01"] / M["m00"])
     return [int(cX), int(cY)]
-
-
 
 def crosshair(img, point, size, color):
     """ Desenha um crosshair centrado no point.
@@ -239,99 +115,181 @@ def crosshair(img, point, size, color):
     cv2.line(img,(x - size,y),(x + size,y),color,5)
     cv2.line(img,(x,y - size),(x, y + size),color,5)
 
+def encontra_hsvs(cor):
+    if cor == "yellow":
+        yellow_hsv = 30
+        low  = np.array([(yellow_hsv - 10), 150, 150], dtype=np.uint8)
+        high = np.array([(yellow_hsv + 10), 255, 255], dtype=np.uint8)
 
-def center_of_mass_region(mask, x1, y1, x2, y2):
-    # Para fins de desenho
-    mask_bgr = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
-    clipped = mask[y1:y2, x1:x2]
-    c = center_of_mass(clipped)
-    c[0]+=x1
-    c[1]+=y1
-    crosshair(mask_bgr, c, 10, (0,0,255))
-    return mask_bgr
+    elif cor == "orange":
+        low  = np.array([0, 150, 150], dtype=np.uint8)
+        high = np.array([10, 255, 255], dtype=np.uint8)
 
-def processa(frame):
-    '''Use esta funcao para basear o processamento do seu robo'''
+    elif cor == "blue":
+        blue_hsv = 120
+        low  = np.array([(blue_hsv - 10), 150, 150], dtype=np.uint8)
+        high = np.array([(blue_hsv + 10), 255, 255], dtype=np.uint8)
+    
+    elif cor == "pink":
+        pink_hsv = 165
+        low  = np.array([(pink_hsv - 10), 150, 150], dtype=np.uint8)
+        high = np.array([(pink_hsv + 10), 255, 255], dtype=np.uint8)
 
-    result_frame, result_tuples = detect(frame)
+    return low, high
 
-    centro = (frame.shape[1]//2, frame.shape[0]//2)
-
-
-    def cross(img_rgb, point, color, width,length):
-        cv2.line(img_rgb, (point[0] - int(length/2), point[1]),  (point[0] + int(length/2), point[1]), color ,width, length)
-        cv2.line(img_rgb, (point[0], point[1] - int(length/2)), (point[0], point[1] + int(length/2)),color ,width, length)
-
-    cross(result_frame, centro, [255,0,0], 1, 17)
-
-
-    return centro, result_frame, result_tuples
-
-
-
-def identifica_cor(frame):
-    '''
-    Segmenta o maior objeto cuja cor é parecida com cor_h (HUE da cor, no espaço HSV).
-    '''
-
-    # No OpenCV, o canal H vai de 0 até 179, logo cores similares ao
-    # vermelho puro (H=0) estão entre H=-8 e H=8.
-    # Precisamos dividir o inRange em duas partes para fazer a detecção
-    # do vermelho:
-    frame_hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-
-    cor_menor = np.array([0, 50, 50])
-    cor_maior = np.array([8, 255, 255])
-    segmentado_cor = cv2.inRange(frame_hsv, cor_menor, cor_maior)
-
-    cor_menor = np.array([172, 50, 50])
-    cor_maior = np.array([180, 255, 255])
-    segmentado_cor += cv2.inRange(frame_hsv, cor_menor, cor_maior)
-
-    # Note que a notacão do numpy encara as imagens como matriz, portanto o enderecamento é
-    # linha, coluna ou (y,x)
-    # Por isso na hora de montar a tupla com o centro precisamos inverter, porque
-    centro = (frame.shape[1]//2, frame.shape[0]//2)
+ 
+def encontra_cm(bgr, cor_escolhida):
+    low, high = encontra_hsvs(cor_escolhida)
+    mascara   = seleciona_cor(bgr, low, high)
+    centro_massa = cm(mascara)
+    draw_cm = crosshair(bgr, centro_massa,  15, (200,100,255))
+    return centro_massa
 
 
-    def cross(img_rgb, point, color, width,length):
-        cv2.line(img_rgb, (point[0] - length/2, point[1]),  (point[0] + length/2, point[1]), color ,width, length)
-        cv2.line(img_rgb, (point[0], point[1] - length/2), (point[0], point[1] + length/2),color ,width, length)
+def controla_direcao(bgr, cor_escolhida):
+    try:
+        cm = encontra_cm(bgr, cor_escolhida)
+        x_cm  = cm[0]
+        incerteza = 20
+        centro    = 160
+
+        if x_cm < centro - incerteza:
+            return "go left"
+        elif x_cm > centro + incerteza:
+            return "go right"
+        else:
+            return "reto"
+    except:
+        return "perdeu pista"
+
+def muda_velocidade(qual_direcao, velocidade_atual, vel_lin, vel_ang):
+    if   qual_direcao == "reto":
+        velocidade_atual.angular.z = 0
+        velin = velocidade_atual.linear.x
+        if velin <= 0.4:
+            velocidade_atual.linear.x += 0.03
+        return velocidade_atual
+
+    elif qual_direcao == "go right":
+        velocidade_atual.angular.z = -vel_ang
+        return velocidade_atual
+
+    elif qual_direcao == "go left":
+        velocidade_atual.angular.z = vel_ang
+        return velocidade_atual
+
+    elif qual_direcao == "perdeu pista":
+        velocidade_atual.linear.x = 0
+        velocidade_atual.angular.z = -2.2*vel_ang
+        return velocidade_atual
 
 
+######################## IDENTIFICA COM ARUCO ###########################
 
-    # A operação MORPH_CLOSE fecha todos os buracos na máscara menores
-    # que um quadrado 7x7. É muito útil para juntar vários
-    # pequenos contornos muito próximos em um só.
-    segmentado_cor = cv2.morphologyEx(segmentado_cor,cv2.MORPH_CLOSE,np.ones((7, 7)))
+#--- Get the camera calibration path
+calib_path          = "/home/borg/catkin_ws/src/robot202/ros/exemplos202/scripts/"
+camera_matrix       = np.loadtxt(calib_path+'cameraMatrix_raspi.txt', delimiter=',')
+camera_distortion   = np.loadtxt(calib_path+'cameraDistortion_raspi.txt', delimiter=',')
 
-    # Encontramos os contornos na máscara e selecionamos o de maior área
-    #contornos, arvore = cv2.findContours(segmentado_cor.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-    img_out, contornos, arvore = cv2.findContours(segmentado_cor.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+#--- Define the aruco dictionary
+aruco_dict  = aruco.getPredefinedDictionary(aruco.DICT_6X6_250)
+parameters  = aruco.DetectorParameters_create()
+parameters.minDistanceToBorder = 0
+parameters.adaptiveThreshWinSizeMax = 1000
 
-    maior_contorno = None
-    maior_contorno_area = 0
+marker_size  = 25 #centimetros
+ids_fim_pista = [50,100,150]
+menor_distancia_tag = 1300
 
-    for cnt in contornos:
-        area = cv2.contourArea(cnt)
-        if area > maior_contorno_area:
-            maior_contorno = cnt
-            maior_contorno_area = area
 
-    # Encontramos o centro do contorno fazendo a média de todos seus pontos.
-    if not maior_contorno is None :
-        cv2.drawContours(frame, [maior_contorno], -1, [0, 0, 255], 5)
-        maior_contorno = np.reshape(maior_contorno, (maior_contorno.shape[0], 2))
-        media = maior_contorno.mean(axis=0)
-        media = media.astype(np.int32)
-        cv2.circle(frame, (media[0], media[1]), 5, [0, 255, 0])
-        cross(frame, centro, [255,0,0], 1, 17)
-    else:
-        media = (0, 0)
+def identifica_tag(img_bgr):
+    try: 
+        gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+        corners, ids, rejectedImgPoints = aruco.detectMarkers(gray, aruco_dict, parameters=parameters)
+        if ids is not None:
+            aruco.drawDetectedMarkers(img_bgr, corners, ids) 
+            ret = aruco.estimatePoseSingleMarkers(corners, marker_size, camera_matrix, camera_distortion)
+            rvec, tvec = ret[0][0,0,:], ret[1][0,0,:]
+            distancia_tag = np.linalg.norm(tvec)
 
-    # Representa a area e o centro do maior contorno no frame
-    font = cv2.FONT_HERSHEY_COMPLEX_SMALL
-    cv2.putText(frame,"{:d} {:d}".format(*media),(20,100), 1, 4,(255,255,255),2,cv2.LINE_AA)
-    cv2.putText(frame,"{:0.1f}".format(maior_contorno_area),(20,50), 1, 4,(255,255,255),2,cv2.LINE_AA)
+            if distancia_tag < menor_distancia_tag:
+                menor_distancia = distancia_tag   
+        
+        return menor_distancia, corners, ids
+    except:
+        return None, None, None
 
-    return centro, result_frame, result_tuples
+def rotacionar_procurar_creeper(img_bgr):
+    menor_distancia, corners, ids = identifica_tag(img_bgr)
+    if ids is not None:
+        for tag in ids:
+            print(tag)
+            print(menor_distancia)
+            if tag[0] in ids_fim_pista and menor_distancia <= 250:
+                print("ROTACIONAR PARA ENCONTRAR O CREEPER")
+                return True
+    else: 
+        return False
+
+def distacia_ate_creeper(img_bgr, id_creeper_procurado):  
+    menor_distancia, corners, ids = identifica_tag(img_bgr)
+    if ids is not None:
+        for tag in ids:
+            print("distancia creeper: ")
+            print(menor_distancia, "\n")
+            if tag[0] == id_creeper_procurado and menor_distancia <= 340:
+                return True
+    else: 
+        return False
+
+
+######################## GARRA ###########################
+
+from std_msgs.msg import Float64
+
+class garra:
+    def __init__(self):
+        self.arm_publisher = rospy.Publisher('/joint1_position_controller/command', Float64, queue_size=1)
+        self.garra_publisher = rospy.Publisher('/joint2_position_controller/command',Float64,queue_size=1)
+
+        self.arm_state  = -1
+        self.garra_state =  0
+        self.time = .1
+
+    def inicializar_garra(self):
+        self.arm_state  = -1
+        self.garra_state =  0
+        
+        self.arm_publisher.publish(self.arm_state) #abaixa 
+        rospy.sleep(self.time)
+
+        self.garra_publisher.publish(self.garra_state) #fecha 
+        rospy.sleep(self.time)
+
+    def up(self):
+        if self.arm_state == -1:
+            self.arm_state = 0
+        elif self.arm_state == 0:
+            self.arm_state = 1.5
+        
+        self.arm_publisher.publish(self.arm_state)
+        rospy.sleep(self.time)
+
+    def down(self):
+        if self.arm_state == 1.5:
+            self.arm_state = 0
+        elif self.arm_state == 0:
+            self.arm_state = -1
+        
+        self.arm_publisher.publish(self.arm_state)
+        rospy.sleep(self.time)
+
+    def open(self):
+        self.garra_state = -1
+        self.garra_publisher.publish(self.garra_state)
+        rospy.sleep(self.time)
+
+    def close(self):
+        self.garra_state = 0
+        self.garra_publisher.publish(self.garra_state)
+        rospy.sleep(self.time)
