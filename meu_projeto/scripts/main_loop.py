@@ -1,15 +1,14 @@
 #! /usr/bin/env python
 # -*- coding:utf-8 -*-
 
-import cv2, rospy, time, tf2_ros, math
+__author__ = ["Gabriel Mitelman Tkacz", "Rafael Seicalli Malcervelli", "Enrico Venturini Costa"]
 
+import cv2, rospy, time, tf2_ros, math
 from sensor_msgs.msg   import Image, CompressedImage
 from cv_bridge         import CvBridge, CvBridgeError
 from geometry_msgs.msg import Twist, Vector3, Pose, Vector3Stamped
-
 from tf import transformations
 from tf import TransformerROS
-
 from auxiliar import encontra_cm, controla_direcao, muda_velocidade, rotacionar_procurar_creeper
 from auxiliar import distacia_ate_creeper, garra
 
