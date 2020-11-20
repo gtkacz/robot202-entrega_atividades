@@ -80,7 +80,7 @@ def roda_todo_frame(imagem):
             velocidade.angular.z = 0
 
             if v_lin > 0.043:
-                velocidade.linear.x -= 0.037
+                velocidade.linear.x -= 0.039
             else:
                 maquina_estados = "usar_garra_no_creeper"
 

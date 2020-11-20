@@ -201,7 +201,6 @@ marker_size  = 25 #centimetros
 ids_fim_pista = [50,100,150]
 menor_distancia_tag = 1300
 
-
 def identifica_tag(img_bgr):
     try: 
         gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
@@ -237,7 +236,7 @@ def distacia_ate_creeper(img_bgr, id_creeper_procurado):
         for tag in ids:
             print("distancia creeper: ")
             print(menor_distancia, "\n")
-            if tag[0] == id_creeper_procurado and menor_distancia <= 340:
+            if tag[0] == id_creeper_procurado and menor_distancia <= 210:
                 return True
     else: 
         return False
