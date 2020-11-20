@@ -245,19 +245,17 @@ def distacia_ate_creeper(img_bgr, id_creeper_procurado):
 
 ######################## GARRA ###########################
 
-from std_msgs.msg import Float64
-
 class garra:
     def __init__(self):
         self.arm_publisher = rospy.Publisher('/joint1_position_controller/command', Float64, queue_size=1)
         self.garra_publisher = rospy.Publisher('/joint2_position_controller/command',Float64,queue_size=1)
 
-        self.arm_state  = -1
-        self.garra_state =  0
-        self.time = .1
+        self.arm_state = -1
+        self.garra_state = 0
+        self.time = 0.1
 
     def inicializar_garra(self):
-        self.arm_state  = -1
+        self.arm_state = -1
         self.garra_state =  0
         
         self.arm_publisher.publish(self.arm_state) #abaixa 
@@ -266,6 +264,16 @@ class garra:
         self.garra_publisher.publish(self.garra_state) #fecha 
         rospy.sleep(self.time)
 
+    def open(self):
+        self.garra_state = -1
+        self.garra_publisher.publish(self.garra_state)
+        rospy.sleep(self.time)
+
+    def close(self):
+        self.garra_state = 0
+        self.garra_publisher.publish(self.garra_state)
+        rospy.sleep(self.time)
+        
     def up(self):
         if self.arm_state == -1:
             self.arm_state = 0
@@ -282,14 +290,4 @@ class garra:
             self.arm_state = -1
         
         self.arm_publisher.publish(self.arm_state)
-        rospy.sleep(self.time)
-
-    def open(self):
-        self.garra_state = -1
-        self.garra_publisher.publish(self.garra_state)
-        rospy.sleep(self.time)
-
-    def close(self):
-        self.garra_state = 0
-        self.garra_publisher.publish(self.garra_state)
         rospy.sleep(self.time)
